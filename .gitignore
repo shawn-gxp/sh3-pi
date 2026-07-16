@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Runtime artifacts and local exports
+*.log
+data/*.csv
+omblepy/*.csv
+*.cfa
+*.apkm
+**/extracted/
+**/decompiled/
+**/tools/
+
+omblepy/*.csv
+omblepy/backup_*.csv
+
+# Large reverse-engineering/tooling artifacts
+*.zip
+*.jar
+*.apk
+*.apkm
+*.jmod
+datasheets/beurer/tools/
+datasheets/beurer/extracted/
+datasheets/beurer/decompiled/
+phoneblelog/*.cfa

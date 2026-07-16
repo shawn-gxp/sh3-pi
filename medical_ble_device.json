@@ -1,0 +1,9 @@
+{
+  "brand": "omron",
+  "model": "HEM-7143T1",
+  "address": "E1:99:7D:27:1C:0A",
+  "action": "read",
+  "output_dir": "data",
+  "updated_at": "2026-07-16 10:19:50.431",
+  "live_interval": 1.0
+}
