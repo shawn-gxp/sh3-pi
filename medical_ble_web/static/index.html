@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Medical BLE Web POC</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4d;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --err: #f07178;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    header {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    header h1 { margin: 0; font-size: 1.15rem; font-weight: 600; }
+    header .badge {
+      font-size: 0.75rem;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 1rem 1.25rem 3rem;
+      display: grid;
+      gap: 1rem;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+    }
+    .card h2 {
+      margin: 0 0 0.75rem;
+      font-size: 0.95rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      align-items: end;
+      margin-bottom: 0.75rem;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    select, input, button {
+      font: inherit;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      padding: 0.45rem 0.65rem;
+    }
+    select, input { min-width: 10rem; }
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      border-color: transparent;
+      color: #fff;
+      font-weight: 600;
+    }
+    button.secondary { background: transparent; border-color: var(--border); color: var(--text); }
+    button.danger { background: #a33; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .hero {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      min-height: 2.5rem;
+      transition: color 0.15s ease, transform 0.12s ease;
+    }
+    .hero.flash {
+      color: var(--ok);
+      transform: scale(1.02);
+    }
+    .hero .sub { font-size: 0.9rem; color: var(--muted); font-weight: 400; margin-top: 0.35rem; }
+    .live-dot {
+      display: inline-block;
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: var(--muted);
+      margin-right: 0.4rem;
+      vertical-align: middle;
+    }
+    .live-dot.on {
+      background: var(--ok);
+      box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.25);
+      animation: pulse 1s ease infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    #wsBadge {
+      font-size: 0.75rem;
+      margin-left: 0.5rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.4rem 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; }
+    tr:hover td { background: rgba(61, 156, 240, 0.06); }
+    tr.selected td { background: rgba(61, 156, 240, 0.15); }
+    .log {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.78rem;
+      max-height: 180px;
+      overflow: auto;
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 0.6rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .status-ok { color: var(--ok); }
+    .status-err { color: var(--err); }
+    .status-run { color: var(--warn); }
+    .notes { font-size: 0.85rem; color: var(--muted); margin: 0.25rem 0 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Medical BLE Web POC</h1>
+    <span class="badge">localhost only · SQLite · all toolkit brands</span>
+    <span class="badge" id="wsBadge">WS: connecting…</span>
+  </header>
+  <main>
+    <section class="card">
+      <h2>Device</h2>
+      <div class="row">
+        <label>Brand / company
+          <select id="brand"></select>
+        </label>
+        <label>Model
+          <input id="model" placeholder="model" />
+        </label>
+        <label>MAC
+          <input id="mac" placeholder="AA:BB:CC:DD:EE:FF" />
+        </label>
+        <button id="btnSave" class="secondary" type="button">Save device</button>
+      </div>
+      <p class="notes" id="brandNotes"></p>
+    </section>
+
+    <section class="card">
+      <h2>Actions</h2>
+      <div class="row">
+        <button id="btnScan" type="button">Scan</button>
+        <button id="btnPair" type="button">Pair</button>
+        <button id="btnRepair" class="secondary" type="button">Re-pair</button>
+        <button id="btnSync" type="button">Sync / Read</button>
+        <button id="btnLive" type="button">Live start</button>
+        <button id="btnStop" class="danger secondary" type="button">Live stop</button>
+        <button id="btnRefresh" class="secondary" type="button">Refresh data</button>
+      </div>
+      <div id="actionStatus" class="notes">Ready.</div>
+    </section>
+
+    <section class="card" id="liveCard">
+      <h2>
+        <span class="live-dot" id="liveDot"></span>
+        <span id="liveTitle">Latest vitals</span>
+        <span id="liveModeLabel" style="font-weight:400;color:var(--muted)">(by selected device)</span>
+      </h2>
+      <div class="hero" id="hero">—</div>
+      <div class="sub" id="liveMeta">Waiting for Live start or Sync…</div>
+      <div class="notes" id="liveClock">Last UI update: —</div>
+    </section>
+
+    <section class="card">
+      <h2>Scan results</h2>
+      <table>
+        <thead>
+          <tr><th>#</th><th>MAC</th><th>Name</th><th></th></tr>
+        </thead>
+        <tbody id="scanBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Saved devices</h2>
+      <table>
+        <thead>
+          <tr><th>Brand</th><th>MAC</th><th>Model</th><th>Paired</th><th></th></tr>
+        </thead>
+        <tbody id="devBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Recent readings (newest first by timestamp)</h2>
+      <table>
+        <thead>
+          <tr><th>When</th><th>Brand</th><th>Type</th><th>Values</th><th>MAC</th></tr>
+        </thead>
+        <tbody id="readBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const logEl = $("log");
+    let brands = [];
+    let liveTimer = null;       // HTTP poll fallback
+    let liveWs = null;          // primary real-time channel
+    let lastVitalsCount = -1;
+    let liveStreamWanted = false; // true after Live start until stop
+
+    function log(msg, cls) {
+      const t = new Date().toLocaleTimeString();
+      const line = document.createElement("div");
+      if (cls) line.className = cls;
+      line.textContent = `[${t}] ${msg}`;
+      logEl.prepend(line);
+    }
+
+    function setStatus(msg, cls) {
+      const el = $("actionStatus");
+      el.textContent = msg;
+      el.className = "notes " + (cls || "");
+    }
+
+    async function api(path, opts) {
+      const res = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...opts,
+      });
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = { detail: text }; }
+      if (!res.ok) {
+        const err = data.detail || data.message || res.statusText;
+        if (err && typeof err === "object") {
+          const e = new Error(err.error || err.code || JSON.stringify(err));
+          e.code = err.code;
+          e.tips = err.tips || [];
+          throw e;
+        }
+        throw new Error(typeof err === "string" ? err : JSON.stringify(err));
+      }
+      return data;
+    }
+
+    function showError(e) {
+      const msg = String(e.message || e);
+      setStatus(msg, "status-err");
+      log(msg, "status-err");
+      (e.tips || []).forEach((t) => log("  → " + t, "status-err"));
+    }
+
+    function currentBrand() {
+      return brands.find((b) => b.id === $("brand").value) || null;
+    }
+
+    function fillBrands(list) {
+      brands = list;
+      const sel = $("brand");
+      sel.innerHTML = "";
+      list.forEach((b) => {
+        const o = document.createElement("option");
+        o.value = b.id;
+        o.textContent = `${b.company} — ${b.label}`;
+        sel.appendChild(o);
+      });
+      onBrandChange();
+    }
+
+    function onBrandChange() {
+      const b = currentBrand();
+      if (!b) return;
+      $("model").value = b.default_model || "";
+      $("brandNotes").textContent = b.notes || "";
+      updateLivePanelTitle(b.id);      saveDeviceSelection();
+    }
+
+    function saveDeviceSelection() {
+      localStorage.setItem('med_ble_brand', $('brand').value);
+      localStorage.setItem('med_ble_mac', $('mac').value);
+      localStorage.setItem('med_ble_model', $('model').value);
+    }
+
+    function restoreDeviceSelection() {
+      const brand = localStorage.getItem('med_ble_brand');
+      const mac = localStorage.getItem('med_ble_mac');
+      const model = localStorage.getItem('med_ble_model');
+      if (brand) {
+        $('brand').value = brand;
+        onBrandChange();
+      }
+      if (mac) $('mac').value = mac;
+      if (model) $('model').value = model;    }
+
+    function selectScan(mac, name) {
+      $("mac").value = mac;
+      log(`Selected ${mac} ${name || ""}`);
+    }
+
+    function renderScan(devices) {
+      const tb = $("scanBody");
+      tb.innerHTML = "";
+      (devices || []).forEach((d, i) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${i + 1}</td>
+          <td>${d.mac || ""}</td>
+          <td>${d.name || ""}</td>
+          <td><button type="button" class="secondary">Use</button></td>`;
+        tr.querySelector("button").onclick = () => selectScan(d.mac, d.name);
+        tr.onclick = (e) => {
+          if (e.target.tagName !== "BUTTON") selectScan(d.mac, d.name);
+        };
+        tb.appendChild(tr);
+      });
+    }
+
+    function renderDevices(devices) {
+      const tb = $("devBody");
+      tb.innerHTML = "";
+      (devices || []).forEach((d) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${d.company || d.brand}</td>
+          <td>${d.mac}</td>
+          <td>${d.model || ""}</td>
+          <td>${d.paired ? "yes" : "no"}</td>
+          <td><button type="button" class="secondary">Use</button></td>`;
+        tr.querySelector("button").onclick = () => {
+          $("brand").value = d.brand;
+          onBrandChange();
+          $("model").value = d.model || $("model").value;
+          $("mac").value = d.mac;
+          log(`Loaded saved device ${d.mac}`);
+        };
+        tb.appendChild(tr);
+      });
+    }
+
+    /** What kind of vitals this brand uses (for labels / live status). */
+    function brandVitalKind(brandId) {
+      const id = (brandId || ($("brand") && $("brand").value) || "").toLowerCase();
+      if (id === "masimo") return "spo2";
+      if (id === "omron" || id === "and" || id === "beurer") return "bp";
+      if (id === "thermo") return "temp";
+      if (id === "fora") return "glucose";
+      return "generic";
+    }
+
+    function vitalKindFromRow(r) {
+      if (!r) return brandVitalKind();
+      if (r.reading_type === "spo2" || r.spo2 != null) return "spo2";
+      if (r.reading_type === "bp" || r.systolic != null) return "bp";
+      if (r.reading_type === "temp" || r.temperature != null) return "temp";
+      if (r.reading_type === "glucose" || r.glucose_mg_dl != null) return "glucose";
+      return brandVitalKind(r.brand);
+    }
+
+    function fmtReading(r) {
+      if (!r) return "—";
+      const kind = vitalKindFromRow(r);
+      if (kind === "spo2" || r.reading_type === "spo2" || r.spo2 != null)
+        return `SpO2 ${r.spo2 ?? "—"}%  PR ${r.pulse_rate ?? "—"}  PI ${r.perfusion_index ?? "—"}`;
+      if (kind === "bp" || r.reading_type === "bp" || r.systolic != null)
+        return `SYS ${r.systolic ?? "—"}  DIA ${r.diastolic ?? "—"}  PULSE ${r.pulse_rate ?? "—"}`;
+      if (kind === "temp" || r.reading_type === "temp" || r.temperature != null)
+        return `Temp ${r.temperature ?? "—"} °`;
+      if (kind === "glucose" || r.reading_type === "glucose" || r.glucose_mg_dl != null)
+        return `Glucose ${r.glucose_mg_dl ?? "—"} mg/dL`;
+      return r.reading_type || JSON.stringify(r.payload || r).slice(0, 80);
+    }
+
+    function liveWaitingHint(brandId, status) {
+      const kind = brandVitalKind(brandId);
+      const st = status || "connecting";
+      if (kind === "spo2")
+        return `LIVE ${st}… waiting for SpO2/PR (finger in sensor)`;
+      if (kind === "bp")
+        return `LIVE ${st}… waiting for BP (measure / transfer mode as needed)`;
+      if (kind === "temp")
+        return `LIVE ${st}… waiting for temperature (measure first — short BLE window)`;
+      if (kind === "glucose")
+        return `LIVE ${st}… waiting for glucose data`;
+      return `LIVE ${st}… waiting for device data`;
+    }
+
+    function liveStatusLine(row, via, brandId) {
+      const kind = vitalKindFromRow(row) || brandVitalKind(brandId);
+      const v = via || "ws";
+      if (!row) return `LIVE · real-time ${v}`;
+      if (kind === "spo2")
+        return `LIVE SpO2 ${row.spo2 ?? "—"}%  PR ${row.pulse_rate ?? "—"}  · real-time ${v}`;
+      if (kind === "bp")
+        return `LIVE SYS ${row.systolic ?? "—"}  DIA ${row.diastolic ?? "—"}  PR ${row.pulse_rate ?? "—"}  · real-time ${v}`;
+      if (kind === "temp")
+        return `LIVE Temp ${row.temperature ?? "—"} °  · real-time ${v}`;
+      if (kind === "glucose")
+        return `LIVE Glucose ${row.glucose_mg_dl ?? "—"}  · real-time ${v}`;
+      return `LIVE ${fmtReading(row)}  · real-time ${v}`;
+    }
+
+    function updateLivePanelTitle(brandId) {
+      const kind = brandVitalKind(brandId);
+      const titles = {
+        spo2: "Live SpO2 / PR",
+        bp: "Live blood pressure",
+        temp: "Live temperature",
+        glucose: "Live glucose",
+        generic: "Latest vitals",
+      };
+      const modes = {
+        spo2: "(stream · WebSocket)",
+        bp: "(sync / session)",
+        temp: "(sync after measure)",
+        glucose: "(sync)",
+        generic: "(by selected device)",
+      };
+      $("liveTitle").textContent = titles[kind] || titles.generic;
+      $("liveModeLabel").textContent = modes[kind] || modes.generic;
+    }
+
+    function readingTime(r) {
+      return (r && (r.measured_at || r.created_at)) || "";
+    }
+
+    function sortByTimeDesc(rows) {
+      return (rows || []).slice().sort((a, b) => {
+        const ta = readingTime(a);
+        const tb = readingTime(b);
+        if (ta === tb) return (b.id || 0) - (a.id || 0);
+        return ta < tb ? 1 : ta > tb ? -1 : 0;
+      });
+    }
+
+    function renderReadings(rows) {
+      const tb = $("readBody");
+      tb.innerHTML = "";
+      // Always newest measurement first (by device timestamp)
+      sortByTimeDesc(rows).forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${readingTime(r)}</td>
+          <td>${r.brand || ""}</td>
+          <td>${r.reading_type || ""}</td>
+          <td>${fmtReading(r)}</td>
+          <td>${r.mac || ""}</td>`;
+        tb.appendChild(tr);
+      });
+    }
+
+    function showLatest(row, meta, opts) {
+      const hero = $("hero");
+      const text = row ? fmtReading(row) : "—";
+      const prev = hero.textContent;
+      hero.textContent = text;
+      const when = row ? readingTime(row) : "";
+      $("liveMeta").textContent = [meta || "", when ? `time ${when}` : ""]
+        .filter(Boolean)
+        .join(" · ");
+      $("liveClock").textContent =
+        "Last UI update: " + new Date().toLocaleTimeString() +
+        (opts && opts.via ? " · via " + opts.via : "");
+      // Flash only when the reading text actually changes
+      if (opts && opts.flash && text !== prev && text !== "—") {
+        hero.classList.remove("flash");
+        void hero.offsetWidth;
+        hero.classList.add("flash");
+        setTimeout(() => hero.classList.remove("flash"), 180);
+      }
+    }
+
+    function applyLiveSnapshot(L, via) {
+      if (!L) return;
+      const n = L.vitals_count || 0;
+      const pk = L.packets || 0;
+      const active = !!L.active;
+      const brandId = L.brand || ($("brand") && $("brand").value) || "";
+      // Title follows live session brand when streaming, else selected brand
+      updateLivePanelTitle(brandId);
+      $("liveDot").classList.toggle(
+        "on",
+        active && (L.status === "live" || L.status === "streaming" || L.status === "reconnecting")
+      );
+      if (L.latest) {
+        showLatest(
+          L.latest,
+          `${active ? "LIVE" : L.status} · ${brandId} · vitals#${n} · pkts#${pk} · ${L.mac || ""}`,
+          { flash: n !== lastVitalsCount, via: via || "ws" }
+        );
+        if (active) {
+          setStatus(liveStatusLine(L.latest, via || "ws", brandId), "status-run");
+        }
+      } else if (active) {
+        setStatus(
+          liveWaitingHint(brandId, L.status || "connecting"),
+          "status-run"
+        );
+        $("liveMeta").textContent =
+          `${L.status} · ${brandId} · ${L.mac || ""} · via ${via || "ws"}`;
+      }
+      if (n !== lastVitalsCount && n > 0) lastVitalsCount = n;
+
+      if (
+        liveStreamWanted &&
+        !active &&
+        L.status !== "starting" &&
+        L.status !== "connecting" &&
+        L.status !== "streaming" &&
+        L.status !== "reconnecting"
+      ) {
+        liveStreamWanted = false;
+        stopLivePolling();
+        setStatus(
+          `Live ${L.status}${L.error ? ": " + L.error : ""}`,
+          L.error ? "status-err" : "status-ok"
+        );
+        if (L.error) log(L.error, "status-err");
+        refreshAll().catch(() => {});
+      }
+    }
+
+    function setWsBadge(text, ok) {
+      const el = $("wsBadge");
+      el.textContent = text;
+      el.style.borderColor = ok ? "var(--ok)" : "var(--border)";
+      el.style.color = ok ? "var(--ok)" : "var(--muted)";
+    }
+
+    function connectLiveWs() {
+      if (liveWs && (liveWs.readyState === WebSocket.OPEN || liveWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const url = `${proto}://${location.host}/ws/live`;
+      try {
+        liveWs = new WebSocket(url);
+      } catch (e) {
+        setWsBadge("WS: failed", false);
+        startLivePollingFallback();
+        return;
+      }
+      liveWs.onopen = () => {
+        setWsBadge("WS: live push ON", true);
+        log("WebSocket connected — real-time push enabled");
+        // Prefer WS; light poll only as safety net
+        startLivePollingFallback(2000);
+      };
+      liveWs.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.live) applyLiveSnapshot(data.live, data.event === "tick" ? "ws-tick" : "ws");
+        } catch (_) {}
+      };
+      liveWs.onerror = () => {
+        setWsBadge("WS: error", false);
+      };
+      liveWs.onclose = () => {
+        setWsBadge("WS: reconnecting…", false);
+        liveWs = null;
+        // Fallback poll faster if WS drops during stream
+        if (liveStreamWanted) startLivePollingFallback(400);
+        setTimeout(connectLiveWs, 1500);
+      };
+    }
+
+    function startLivePollingFallback(ms) {
+      if (liveTimer) clearInterval(liveTimer);
+      liveTimer = setInterval(async () => {
+        try {
+          const data = await api("/live/latest");
+          applyLiveSnapshot(data.live || {}, "poll");
+        } catch (_) {}
+      }, ms || 500);
+    }
+
+    function stopLivePolling() {
+      if (liveTimer) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+      }
+    }
+
+    async function refreshAll() {
+      const [devs, reads, live] = await Promise.all([
+        api("/devices"),
+        api("/readings?limit=40"),
+        api("/live/latest"),
+      ]);
+      renderDevices(devs.devices || []);
+      const sorted = sortByTimeDesc(reads.readings || []);
+      renderReadings(sorted);
+      const L = live.live || {};
+      if (L.latest) {
+        showLatest(L.latest, `live ${L.status} · ${L.brand} · ${L.mac}`);
+      } else if (sorted[0]) {
+        const r = sorted[0];
+        showLatest(r, `latest by time · ${r.brand} · ${r.mac || ""}`);
+      }
+    }
+
+    function busy(on) {
+      ["btnScan","btnPair","btnRepair","btnSync","btnLive","btnSave"].forEach((id) => {
+        $(id).disabled = !!on;
+      });
+    }
+
+    $("brand").onchange = onBrandChange;    $('mac').onchange = saveDeviceSelection;
+    $('model').onchange = saveDeviceSelection;
+    $("btnScan").onclick = async () => {
+      busy(true);
+      setStatus("Scanning…", "status-run");
+      try {
+        const brand = $("brand").value;
+        // Broad scan (no brand filter) finds new devices more reliably
+        const data = await api("/scan", {
+          method: "POST",
+          body: JSON.stringify({ brand: null, timeout: 8 }),
+        });
+        renderScan(data.devices || []);
+        setStatus(`Scan done: ${data.count} device(s)`, "status-ok");
+        log(`Scan: ${data.count} device(s)`);
+      } catch (e) {
+        setStatus(String(e.message || e), "status-err");
+        log(String(e.message || e), "status-err");
+      } finally {
+        busy(false);
+      }
+    };
+
+    $("btnSave").onclick = async () => {
+      try {
+        const data = await api("/devices", {
+          method: "POST",
+          body: JSON.stringify({
+            brand: $("brand").value,
+            mac: $("mac").value,
+            model: $("model").value,
+            name: $("model").value,
+          }),
+        });
+        log(`Saved ${data.device.mac}`);
+        await refreshAll();
+      } catch (e) {
+        log(String(e.message || e), "status-err");
+      }
+    };
+
+    async function doPair(repair) {
+      if (!$("mac").value.trim()) {
+        setStatus("Enter or pick a MAC first", "status-err");
+        return;
+      }
+      busy(true);
+      setStatus(repair ? "Re-pairing… accept Windows dialog" : "Pairing… accept Windows dialog", "status-run");
+      try {
+        const data = await api("/pair", {
+          method: "POST",
+          body: JSON.stringify({
+            brand: $("brand").value,
+            mac: $("mac").value,
+            model: $("model").value,
+            repair: !!repair,
+          }),
+        });
+        setStatus(`Pair OK · ${data.mac}`, "status-ok");
+        log(`Pair OK ${data.mac}`);
+        (data.next_steps || []).forEach((t) => log("  → " + t));
+        if ($("brand").value === "omron") {
+          setStatus(
+            "Pair OK — try Sync now (no button). If FE4A error: short-press BT → Sync.",
+            "status-ok"
+          );
+        }
+        await refreshAll();
+      } catch (e) {
+        showError(e);
+      } finally {
+        busy(false);
+      }
+    }
+
+    $("btnPair").onclick = () => doPair(false);
+    $("btnRepair").onclick = () => doPair(true);
+
+    $("btnSync").onclick = async () => {
+      if (!$("mac").value.trim()) {
+        setStatus("Enter or pick a MAC first", "status-err");
+        return;
+      }
+      busy(true);
+      const omron = $("brand").value === "omron";
+      const isAnd = $("brand").value === "and";
+      const isMasimo = $("brand").value === "masimo";
+      const isThermo = $("brand").value === "thermo";
+      if (isMasimo) {
+        log("Masimo: Sync is a short snapshot. For continuous SpO2 use Live start.");
+      }
+      if (isThermo) {
+        log("NT-100B: measure first, then Sync within ~2 min while BLE is on.");
+      }
+      setStatus(
+        omron
+          ? "Omron sync… (button only if FE4A fails)"
+          : isAnd
+          ? "A&D/Nipro sync… waiting for full Indicate dump (up to 30)…"
+          : isMasimo
+          ? "Masimo short sync (use Live for continuous SpO2)…"
+          : isThermo
+          ? "NT-100B sync… (must be advertising after a measurement)"
+          : "Syncing / reading…",
+        "status-run"
+      );
+      try {
+        const data = await api("/sync", {
+          method: "POST",
+          body: JSON.stringify({
+            brand: $("brand").value,
+            mac: $("mac").value,
+            model: $("model").value,
+            listen_s: omron ? 45 : isAnd ? 60 : isThermo ? 20 : 30,
+          }),
+        });
+        if (data.latest) showLatest(data.latest, `sync stored=${data.stored}`);
+        setStatus(`Sync OK · stored ${data.stored} clinical reading(s)`, "status-ok");
+        log(`Sync OK stored=${data.stored}`);
+        if (data.warning) {
+          log(data.warning, "status-err");
+          setStatus(data.warning, "status-err");
+        }
+        (data.tips || []).forEach((t) => log("  → " + t));
+        await refreshAll();
+      } catch (e) {
+        showError(e);
+      } finally {
+        busy(false);
+      }
+    };
+
+    $("btnLive").onclick = async () => {
+      if (!$("mac").value.trim()) {
+        setStatus("Enter or pick a MAC first", "status-err");
+        return;
+      }
+      const brandId = $("brand").value;
+      const kind = brandVitalKind(brandId);
+      updateLivePanelTitle(brandId);
+      if (kind === "spo2") {
+        log("Masimo: continuous SpO2/PR stream (Live). Keep finger in sensor.");
+      } else if (kind === "bp") {
+        log("BP brands: Live keeps a session; for full history prefer Sync / Read.");
+      } else if (kind === "temp") {
+        log("NT-100B: measure first (BLE ~2 min), then Live/Sync quickly.");
+      } else {
+        log("Live session for selected device — vitals format follows brand.");
+      }
+      busy(true);
+      try {
+        connectLiveWs(); // ensure WS is up before stream starts
+        const data = await api("/live/start", {
+          method: "POST",
+          body: JSON.stringify({
+            brand: brandId,
+            mac: $("mac").value,
+            model: $("model").value,
+            duration_s: 3600,
+          }),
+        });
+        liveStreamWanted = true;
+        lastVitalsCount = -1;
+        const streamHint =
+          kind === "spo2"
+            ? "SpO2 stream + auto-reconnect"
+            : kind === "bp"
+            ? "BP session (use Sync for multi-record history)"
+            : kind === "temp"
+            ? "temp session (measure first)"
+            : "live session";
+        setStatus(`LIVE on (${streamHint}) — WebSocket real-time`, "status-run");
+        log(`Live start ${data.mac} [${brandId}] — ${data.message || ""}`);
+        if (data.auto_reconnect) log("Auto-reconnect enabled for this stream");
+        startLivePollingFallback(800);
+      } catch (e) {
+        liveStreamWanted = false;
+        showError(e);
+      } finally {
+        busy(false);
+      }
+    };
+
+    $("btnStop").onclick = async () => {
+      try {
+        liveStreamWanted = false;
+        await api("/live/stop", { method: "POST", body: "{}" });
+        stopLivePolling();
+        $("liveDot").classList.remove("on");
+        setStatus("Live stop requested", "status-ok");
+        log("Live stop");
+        await refreshAll();
+      } catch (e) {
+        log(String(e.message || e), "status-err");
+      }
+    };
+
+    $("btnRefresh").onclick = () => refreshAll().catch((e) => log(String(e), "status-err"));
+
+    (async () => {
+      try {
+        const b = await api("/brands");
+        fillBrands(b.brands || []);        restoreDeviceSelection();        await refreshAll();
+        connectLiveWs();
+        log("Ready · " + (b.brands || []).length + " brands · WebSocket for live UI");
+      } catch (e) {
+        log("Init failed: " + e, "status-err");
+      }
+    })();
+  </script>
+</body>
+</html>

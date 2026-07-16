@@ -1,9 +1,9 @@
 {
-  "brand": "omron",
-  "model": "HEM-7143T1",
-  "address": "E1:99:7D:27:1C:0A",
-  "action": "read",
+  "brand": "and",
+  "model": "NBP-1BLE",
+  "address": "6C:EC:EB:45:6F:6A",
+  "action": "connect",
   "output_dir": "data",
-  "updated_at": "2026-07-16 10:19:50.431",
+  "updated_at": "2026-07-16 10:56:01.348",
   "live_interval": 1.0
 }

@@ -400,36 +400,6 @@ class MedicalBleClient:
             ):
                 use_feed = callable(getattr(self._parser, "feed", None))
 
-            # A&D UA-651BLE (Nipro pack): custom 0xF001 traffic is NOT BLP 0x2A35
-            uuid_l = uuid.lower().replace("-", "")
-            if self.profile.id == "and_ua651" and (
-                "f001" in uuid_l or "f000" in uuid_l or "233bf00" in uuid_l
-            ):
-                custom = and_mod.parse_custom_response(payload)
-                log.info(
-                    "[PARSE] packet=#%d A&D custom (not BP): cmd=0x%02X type=%s",
-                    seq,
-                    int(custom.get("command") or 0),
-                    custom.get("msg_type") or custom.get("type"),
-                )
-                # Do not store as clinical reading
-                return
-
-            # Gate BLP / other parsers on characteristic when can_parse exists
-            if (
-                not use_feed
-                and not self.auto_dispatch
-                and hasattr(self._parser, "can_parse")
-                and not self._parser.can_parse(payload, uuid)
-            ):
-                log.debug(
-                    "[PARSE] packet=#%d skip %s (can_parse=False for char %s)",
-                    seq,
-                    getattr(self._parser, "name", type(self._parser).__name__),
-                    uuid,
-                )
-                return
-
             if self.auto_dispatch and not use_feed:
                 results = [
                     parse_payload(
@@ -1087,8 +1057,6 @@ class MedicalBleClient:
                 _log_winrt(exc, operation="mightysat_write")
 
         if pid == "thermometer":
-            # NT-100B / TICD (Nipro pack): BLE is usually OFF until a measurement
-            # completes, then advertises ~1–2 minutes. Operator must Sync in that window.
             wu = self._resolved_write_uuid or self.profile.write_uuid
             if not wu:
                 log.error(
@@ -1098,140 +1066,103 @@ class MedicalBleClient:
             elif not self._subscribed:
                 log.error(
                     "Thermometer: no notify CCCD enabled — responses would be lost. "
-                    "Take a reading first (BLE on ~2 min), then PAIR once + SYNC quickly."
+                    "Check [GATT] map; try PAIR then LIVE, or RE mode for UUID discovery."
                 )
             else:
                 log.info(
-                    "Thermometer NT-100B: dual-wake → clock → count → history "
-                    "(TICD v1.16) via %s  [BLE window ~2 min after measure]",
+                    "Thermometer NT-100B: dual wake → write clock → storage count → "
+                    "history poll (TICD v1.16) via %s …",
                     wu,
                 )
-
-                async def _tw(data: bytes, label: str) -> None:
-                    """WriteWithoutResponse first; fall back to Write with response."""
-                    try:
-                        await self._write_bytes(
-                            wu, data, response=False, label=label
-                        )
-                    except BleakError:
-                        await self._write_bytes(
-                            wu, data, response=True, label=label + "_rsp"
-                        )
-
                 try:
-                    # 1-2: two cmds within 10s enter communication mode (doc)
-                    wake = thermo_mod.cmd_wakeup_pair()
-                    await _tw(wake, "thermo_wake1")
-                    await asyncio.sleep(0.55)
-                    await _tw(wake, "thermo_wake2")
-                    await asyncio.sleep(0.7)  # allow unsolicited 0x54 enter-comm
-
-                    # 3: clock (helps storage timestamps)
-                    await _tw(thermo_mod.cmd_write_clock(), "thermo_write_clock")
+                    # 1-2: any two cmds within 10s enter communication mode
+                    frame = thermo_mod.cmd_wakeup_pair()
+                    await self._write_bytes(
+                        wu, frame, response=False, label="thermo_wake1"
+                    )
+                    await asyncio.sleep(0.3)
+                    await self._write_bytes(
+                        wu, frame, response=False, label="thermo_wake2"
+                    )
+                    await asyncio.sleep(0.3)
+                    # 3: sync clock so storage timestamps are meaningful
+                    await self._write_bytes(
+                        wu,
+                        thermo_mod.cmd_write_clock(),
+                        response=False,
+                        label="thermo_write_clock",
+                    )
+                    await asyncio.sleep(0.25)
+                    # 4: identity helpers (model + SN) — responses via notify
+                    await self._write_bytes(
+                        wu,
+                        thermo_mod.cmd_read_model(),
+                        response=False,
+                        label="thermo_model",
+                    )
+                    await asyncio.sleep(0.15)
+                    await self._write_bytes(
+                        wu,
+                        thermo_mod.cmd_read_serial_part1(),
+                        response=False,
+                        label="thermo_sn1",
+                    )
+                    await asyncio.sleep(0.15)
+                    await self._write_bytes(
+                        wu,
+                        thermo_mod.cmd_read_serial_part2(),
+                        response=False,
+                        label="thermo_sn2",
+                    )
+                    await asyncio.sleep(0.2)
+                    # 5: storage count then latest N index pairs (0 = newest)
+                    await self._write_bytes(
+                        wu,
+                        thermo_mod.cmd_read_storage_count(),
+                        response=False,
+                        label="thermo_count",
+                    )
                     await asyncio.sleep(0.35)
-
-                    # 4: storage count 0x2B — drives how many 0x25/0x26 pairs to pull
-                    await _tw(thermo_mod.cmd_read_storage_count(), "thermo_count")
-                    await asyncio.sleep(0.6)
-
-                    count = 1  # always try at least latest slot (index 0)
-                    for r in self.readings:
-                        if isinstance(r, dict) and r.get("type") == "storage_count":
-                            try:
-                                count = max(0, int(r.get("count") or 0))
-                            except (TypeError, ValueError):
-                                count = 1
-                            break
-                    if count <= 0:
-                        log.warning(
-                            "Thermometer storage_count=0 or missing — still polling "
-                            "index 0 (latest). Device may have empty memory."
-                        )
-                        count = 1
-                    # Cap for session time (2 min BLE window)
-                    max_hist = min(count, 20)
-                    log.info(
-                        "Thermometer: pulling %d history slot(s) (count=%s)",
-                        max_hist,
-                        count,
-                    )
-
+                    # Pull latest 15 slots as 0x25/0x26 pairs
+                    max_hist = 15
                     for index in range(max_hist):
-                        if not self._client or not self._client.is_connected:
-                            log.warning(
-                                "Thermometer disconnected mid-history at index %d",
-                                index,
-                            )
-                            break
-                        if hasattr(self._parser, "set_history_index"):
-                            self._parser.set_history_index(index)  # type: ignore[attr-defined]
-                        await _tw(
+                        await self._write_bytes(
+                            wu,
                             thermo_mod.cmd_read_storage_time(index),
-                            f"thermo_time[{index}]",
+                            response=False,
+                            label=f"thermo_time[{index}]",
                         )
-                        await asyncio.sleep(0.35)
-                        await _tw(
+                        await asyncio.sleep(0.12)
+                        await self._write_bytes(
+                            wu,
                             thermo_mod.cmd_read_storage_result(index),
-                            f"thermo_result[{index}]",
+                            response=False,
+                            label=f"thermo_result[{index}]",
                         )
-                        await asyncio.sleep(0.35)
-
-                    # Optional live IR measure (0x41) if no temperature yet
-                    n_temp = sum(
-                        1
-                        for r in self.readings
-                        if getattr(r, "object_temperature", None) is not None
-                    )
-                    if n_temp == 0 and self._client and self._client.is_connected:
-                        log.info(
-                            "Thermometer: no storage temps yet — trying 0x41 start measure"
-                        )
-                        await _tw(thermo_mod.cmd_start_measure(), "thermo_start_measure")
-                        await asyncio.sleep(0.8)
-
+                        await asyncio.sleep(0.12)
                     log.info(
-                        "Thermometer poll done: readings_buf=%d (temps will show as "
-                        "ThermometerReading). Keep device awake; BLE often ends ~2 min "
-                        "after the measurement that turned advertising on.",
-                        len(self.readings),
+                        "Thermometer history poll queued (up to %d latest records). "
+                        "Watch [PARSE] for storage_count / ThermometerReading.",
+                        max_hist,
                     )
                 except BleakError as exc:
                     log.error("Thermometer setup write failed: %s", exc)
                     _log_winrt(exc, operation="thermometer_write")
 
         if pid == "and_ua651":
-            # A&D UA-651BLE (Nipro pack) SDK sequence after encrypt (~5s gate):
-            #   1) CCCD Indicate on 0x2A35 (already done in subscribe)
-            #   2) Optional: custom 0xA6 buffer mode=1 → up to 30 stored records
-            #   3) Date Time 0x2A08 and/or custom 0x01 Set Time
-            #   4) Optional 0xE1 request-all — then device Indicates oldest-first
-            # Device only sends what is *actually stored* (not empty slots).
+            # SDK §3: after encrypt, within 5s — CCCD Indicate (done in subscribe)
+            # AND Date Time write → device immediately dumps memory oldest-first.
             log.info(
-                "UA-651BLE (Nipro): buffer=30 + Date Time + Set Time + 0xE1 "
-                "within 5s gate (CCCD Indicate already on)…"
+                "UA-651BLE: writing Date Time (0x2A08) + custom Set Time (0x01) "
+                "within 5s gate (CCCD already enabled)…"
             )
             if is_windows() and not self.pair:
                 log.warning(
                     "[WINRT] UA-651BLE usually needs OS bonding — re-run with --pair "
                     "if indications never arrive."
                 )
-            custom_uuid = self.profile.write_uuid or and_mod.AND_CUSTOM_CHAR_UUID
-            # 0xA6 mode 1 = 30-record buffer (SDK); mode 0 = no buffer (only latest)
             try:
-                await self._write_bytes(
-                    custom_uuid,
-                    and_mod.cmd_set_buffer_size(1),
-                    response=True,
-                    label="and_set_buffer_30",
-                )
-                await asyncio.sleep(0.15)
-            except BleakError as exc:
-                log.warning(
-                    "UA-651BLE 0xA6 set buffer(30) failed (may still dump): %s",
-                    exc,
-                )
-                _log_winrt(exc, operation="and_set_buffer_a6")
-            try:
+                # Prefer SIG Date Time characteristic
                 await self._write_bytes(
                     and_mod.DATE_TIME_UUID,
                     and_mod.encode_date_time_2a08(),
@@ -1245,33 +1176,21 @@ class MedicalBleClient:
                 )
                 _log_winrt(exc, operation="and_date_time_2a08")
             try:
+                custom_uuid = self.profile.write_uuid or and_mod.AND_CUSTOM_CHAR_UUID
                 await self._write_bytes(
                     custom_uuid,
                     and_mod.cmd_set_time(),
                     response=True,
                     label="and_custom_set_time",
                 )
+                log.info(
+                    "UA-651BLE time armed — device should Indicate stored BP "
+                    "(oldest first) on 0x2A35. Optional cmds: disconnect/unpair/"
+                    "clear mem in parsers.and_ua651."
+                )
             except BleakError as exc:
                 log.error("UA-651BLE custom Set Time failed: %s", exc)
                 _log_winrt(exc, operation="and_custom_set_time")
-            try:
-                await asyncio.sleep(0.2)
-                await self._write_bytes(
-                    custom_uuid,
-                    and_mod.cmd_request_all_memory(),
-                    response=True,
-                    label="and_request_all_memory_e1",
-                )
-                log.info(
-                    "UA-651BLE armed — expect up to 30 BP Indications on 0x2A35 "
-                    "(oldest first; only stored measurements, not empty slots)."
-                )
-            except BleakError as exc:
-                log.warning(
-                    "UA-651BLE 0xE1 request-all failed (may still dump after time): %s",
-                    exc,
-                )
-                _log_winrt(exc, operation="and_request_all_e1")
 
         if pid == "beurer_bm54":
             log.info(
@@ -1322,22 +1241,13 @@ class MedicalBleClient:
         import time as _time
 
         # Beurer app restarts idle timer on each packet; constructor arg ~4s quiet
-        if quiet_timeout is None and self.profile.id == "beurer_bm54":
+        if quiet_timeout is None and self.profile.id in ("beurer_bm54", "and_ua651"):
             quiet_timeout = 4.0
-        # A&D can space multi-record Indications; 4s cut dump to 1 reading often
-        if quiet_timeout is None and self.profile.id == "and_ua651":
-            quiet_timeout = 12.0
-        # MightySat / streams: never quiet-end (0.0 forced from run())
-        if quiet_timeout == 0.0:
-            quiet_timeout = None
 
         log.info(
-            "Listening up to %.0fs (quiet_timeout=%s)%s",
+            "Listening up to %.0fs (quiet_timeout=%s) — device may auto-send history.",
             duration,
             f"{quiet_timeout:.1f}s" if quiet_timeout else "off",
-            " — STREAMING (no early quiet-end)"
-            if self.profile.id in ("mightysat",)
-            else " — device may auto-send history.",
         )
         log.info(
             "RE TIP: Watch for [HEX] lines. Correlate [TS] ms stamps with button presses."
@@ -1394,31 +1304,13 @@ class MedicalBleClient:
         self,
         duration: float = 60.0,
         connect_timeout: float = 30.0,
-        *,
-        quiet_timeout: Optional[float] = None,
-        raise_on_error: bool = False,
     ) -> List[Any]:
-        """
-        Full session: connect → subscribe → device setup → listen → disconnect.
-
-        quiet_timeout: pass through to listen(); None = use profile defaults
-          (Beurer/A&D early quiet-end). For streaming devices (MightySat) pass
-          quiet_timeout=None and a long duration — do NOT use BP quiet-end.
-        raise_on_error: if True, re-raise BLE failures (web live needs this).
-        """
-        # Streaming profiles must not inherit BP quiet-end from a prior default
-        if quiet_timeout is None and self.profile.id in ("mightysat",):
-            quiet_timeout = 0.0  # sentinel: listen() treats 0 as "off"
-        err: Optional[BaseException] = None
         try:
             await self.connect(timeout=connect_timeout)
             await self.subscribe()
             await self.run_post_connect_setup()
-            # 0.0 means disable quiet-end (continuous stream)
-            qt = None if quiet_timeout == 0.0 else quiet_timeout
-            await self.listen(duration=duration, quiet_timeout=qt)
+            await self.listen(duration=duration)
         except (BleakError, asyncio.TimeoutError, OSError) as exc:
-            err = exc
             log.error(
                 "Session aborted: %s: %s",
                 type(exc).__name__,
@@ -1426,7 +1318,6 @@ class MedicalBleClient:
             )
             _log_winrt(exc, operation="session")
         except Exception as exc:  # noqa: BLE001
-            err = exc
             log.error(
                 "Session aborted (unexpected): %s: %s",
                 type(exc).__name__,
@@ -1442,8 +1333,6 @@ class MedicalBleClient:
             len(self.raw_payloads),
             ms_timestamp(),
         )
-        if raise_on_error and err is not None:
-            raise err
         return self.readings
 
 

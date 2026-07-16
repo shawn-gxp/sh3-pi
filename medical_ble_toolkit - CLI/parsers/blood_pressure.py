@@ -243,27 +243,16 @@ class BlpBloodPressureParser:
         self.pulse_swapped = pulse_swapped
 
     def can_parse(self, payload: bytes | bytearray, characteristic_uuid: str = "") -> bool:
-        uuid = (characteristic_uuid or "").lower().replace("-", "")
-        # Never treat A&D custom 0xF001 (20-byte command/response) as BLP
-        if "f001" in uuid or "f000" in uuid or "233bf00" in uuid:
-            return False
-        if "2a35" in uuid or "2a36" in uuid:
+        uuid = characteristic_uuid.lower().replace("-", "")
+        if "2a35" in uuid:
             return True
-        # Heuristic only when UUID unknown: flags + 3×SFLOAT, not A&D custom framing
-        if len(payload) < 7 or len(payload) > 20:
-            return False
-        # A&D custom buffer: [size][type 0|1|2][cmd]… size is small (2–10)
-        if (
-            len(payload) >= 3
-            and payload[0] <= 17
-            and payload[1] in (0x00, 0x01, 0x02)
-            and payload[0] + 1 <= len(payload)
-        ):
-            # Likely custom service framing, not BLP flags
+        # Heuristic: flags always present, length typically 7–19
+        if len(payload) < 7:
             return False
         flags = payload[0]
-        # Beurer BM54 often 0x1E; reject reserved high bits
-        return (flags & 0xE0) == 0
+        # Beurer BM54 always uses flags 0x1E when all optional fields present
+        # Accept any flags where reserved high bits are zero-ish
+        return (flags & 0xE0) == 0 and len(payload) <= 20
 
     def parse(self, payload: bytes | bytearray) -> BloodPressureReading:
         return parse_blood_pressure_measurement(

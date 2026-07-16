@@ -307,14 +307,10 @@ class ThermometerParser:
         self._last_time_meta: Optional[dict] = None
         self._last_index: int = 0
 
-    def set_history_index(self, index: int) -> None:
-        """Host is about to poll 0x25/0x26 for this storage slot (0 = latest)."""
-        self._last_index = max(0, int(index))
-
     def can_parse(self, payload: bytes | bytearray, characteristic_uuid: str = "") -> bool:
-        uuid = (characteristic_uuid or "").lower()
+        uuid = characteristic_uuid.lower()
         if THERMO_CHAR_HINT in uuid or THERMO_SERVICE_HINT in uuid:
-            return len(payload) >= 3 and (len(payload) == 8 or payload[0] == FRAME_START)
+            return True
         return len(payload) == 8 and payload[0] == FRAME_START
 
     def parse(self, payload: bytes | bytearray) -> ParseResult:
@@ -332,13 +328,11 @@ class ThermometerParser:
         if cmd == CMD_READ_STORAGE_TIME:
             meta = parse_storage_time_response(raw, index=self._last_index)
             self._last_time_meta = meta
-            # Keep index sticky until next 0x25 so following 0x26 pairs correctly
             return meta
         if cmd == CMD_READ_STORAGE_RESULT:
-            reading = parse_storage_result_response(
+            return parse_storage_result_response(
                 raw, meta=self._last_time_meta, index=self._last_index
             )
-            return reading
         if cmd == CMD_START_MEASURE:
             return parse_live_measure_response(raw)
         if cmd == CMD_READ_STORAGE_COUNT:
