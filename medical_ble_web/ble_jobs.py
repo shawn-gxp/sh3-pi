@@ -428,11 +428,12 @@ async def job_sync(
                     raise last_omron_exc
                 assert all_users is not None
                 flat = flatten_readings(all_users)
+                skipped_dup = 0
                 for r in flat:
                     row = _reading_to_row(r, brand_id)
                     if not _is_clinical(row):
                         continue
-                    db.insert_reading(
+                    rid = db.insert_reading(
                         device_id=device_id,
                         session_id=sid,
                         brand=brand_id,
@@ -447,7 +448,12 @@ async def job_sync(
                         glucose_mg_dl=row.get("glucose_mg_dl"),
                         payload=row.get("payload"),
                         raw_hex=row.get("raw_hex") or "",
+                        dedupe=True,  # Omron history re-syncs same 30 EEPROM slots
                     )
+                    if rid is None:
+                        skipped_dup += 1
+                        collected.append(row)  # still show on dashboard
+                        continue
                     stored += 1
                     collected.append(row)
             elif brand_id == "beurer":
@@ -459,16 +465,10 @@ async def job_sync(
                 result = await sess.run()
                 for r in result.readings:
                     row = _reading_to_row(r, brand_id)
-                    if not _is_clinical(row) and row["reading_type"] not in (
-                        "raw",
-                        "other",
-                    ):
-                        if row["reading_type"] == "waveform":
-                            continue
                     if row["reading_type"] == "waveform":
                         continue
                     if _is_clinical(row) or row.get("payload"):
-                        db.insert_reading(
+                        rid = db.insert_reading(
                             device_id=device_id,
                             session_id=sid,
                             brand=brand_id,
@@ -483,10 +483,12 @@ async def job_sync(
                             glucose_mg_dl=row.get("glucose_mg_dl"),
                             payload=row.get("payload"),
                             raw_hex=row.get("raw_hex") or "",
+                            dedupe=_is_clinical(row),
                         )
                         if _is_clinical(row):
-                            stored += 1
                             collected.append(row)
+                            if rid is not None:
+                                stored += 1
                 if not result.ok and stored == 0:
                     raise RuntimeError(result.message or str(result.status))
             else:
@@ -538,7 +540,7 @@ async def job_sync(
                     if _is_clinical(row) or row["reading_type"] in ("meta", "raw"):
                         if row["reading_type"] == "meta":
                             continue
-                        db.insert_reading(
+                        rid = db.insert_reading(
                             device_id=device_id,
                             session_id=sid,
                             brand=brand_id,
@@ -553,19 +555,42 @@ async def job_sync(
                             glucose_mg_dl=row.get("glucose_mg_dl"),
                             payload=row.get("payload"),
                             raw_hex=row.get("raw_hex") or "",
+                            dedupe=_is_clinical(row),
                         )
                         if _is_clinical(row):
-                            stored += 1
                             collected.append(row)
+                            if rid is not None:
+                                stored += 1
 
         latest = _pick_newest(collected)
         db.end_session(sid, "ok")
+        # Compact rows for UI (no huge payload blobs)
+        ui_rows: List[Dict[str, Any]] = []
+        for row in collected:
+            ui_rows.append(
+                {
+                    "brand": brand_id,
+                    "mac": mac_u,
+                    "reading_type": row.get("reading_type"),
+                    "measured_at": row.get("measured_at"),
+                    "systolic": row.get("systolic"),
+                    "diastolic": row.get("diastolic"),
+                    "pulse_rate": row.get("pulse_rate"),
+                    "spo2": row.get("spo2"),
+                    "perfusion_index": row.get("perfusion_index"),
+                    "temperature": row.get("temperature"),
+                    "glucose_mg_dl": row.get("glucose_mg_dl"),
+                }
+            )
         out: Dict[str, Any] = {
             "ok": True,
             "mac": mac_u,
             "brand": brand_id,
             "stored": stored,
+            "total": len(collected),
+            "skipped_duplicates": max(0, len(collected) - stored),
             "latest": latest,
+            "readings": ui_rows[:80],  # this sync batch for immediate dashboard
             "session_id": sid,
         }
         if brand_id in ("thermo", "thermometer") and stored == 0:
@@ -946,4 +971,6 @@ async def job_live_stop() -> Dict[str, Any]:
     _live_status["active"] = False
     if _live_status.get("status") not in ("error",):
         _live_status["status"] = "stopped"
+    # Keep last live packet for reference, but mark inactive so UI uses device history
+    _push_live_to_clients()
     return {"ok": True, "status": live_status()}

@@ -95,18 +95,66 @@
     button.secondary { background: transparent; border-color: var(--border); color: var(--text); }
     button.danger { background: #a33; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .hero {
-      font-size: 1.75rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      min-height: 2.5rem;
-      transition: color 0.15s ease, transform 0.12s ease;
+    button.active-filter {
+      background: rgba(61, 156, 240, 0.25);
+      border-color: var(--accent);
+      color: var(--text);
     }
-    .hero.flash {
-      color: var(--ok);
+
+    /* Vitals display */
+    .vitals-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 0.75rem;
+      margin: 0.5rem 0 0.75rem;
+    }
+    .vital-tile {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem 0.9rem;
+      text-align: center;
+      min-height: 5.5rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      transition: border-color 0.15s ease, transform 0.12s ease;
+    }
+    .vital-tile.flash {
+      border-color: var(--ok);
       transform: scale(1.02);
     }
-    .hero .sub { font-size: 0.9rem; color: var(--muted); font-weight: 400; margin-top: 0.35rem; }
+    .vital-tile .vlabel {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.25rem;
+    }
+    .vital-tile .vvalue {
+      font-size: 1.85rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+    .vital-tile .vunit {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+    }
+    .vital-tile.spo2 .vvalue { color: #5ec8ff; }
+    .vital-tile.bp-sys .vvalue { color: #f07178; }
+    .vital-tile.bp-dia .vvalue { color: #f0b429; }
+    .vital-tile.pr .vvalue { color: #3ecf8e; }
+    .vital-tile.temp .vvalue { color: #c792ea; }
+    .vital-tile.glucose .vvalue { color: #ffcb6b; }
+    .vital-tile.pi .vvalue { color: #82aaff; }
+    .vital-empty {
+      color: var(--muted);
+      font-size: 0.95rem;
+      padding: 1rem 0.25rem;
+    }
+
     .live-dot {
       display: inline-block;
       width: 0.55rem;
@@ -125,10 +173,24 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.45; }
     }
-    #wsBadge {
-      font-size: 0.75rem;
-      margin-left: 0.5rem;
+    #wsBadge { font-size: 0.75rem; margin-left: 0.5rem; }
+    .panel-meta {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
     }
+    .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 0.5rem 0.65rem;
+      margin-top: 0.5rem;
+      border-left: 3px solid var(--border);
+    }
+    .hint.stream { border-left-color: var(--ok); }
+    .hint.warn { border-left-color: var(--warn); }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -141,7 +203,6 @@
     }
     th { color: var(--muted); font-weight: 500; }
     tr:hover td { background: rgba(61, 156, 240, 0.06); }
-    tr.selected td { background: rgba(61, 156, 240, 0.15); }
     .log {
       font-family: ui-monospace, Consolas, monospace;
       font-size: 0.78rem;
@@ -157,6 +218,23 @@
     .status-err { color: var(--err); }
     .status-run { color: var(--warn); }
     .notes { font-size: 0.85rem; color: var(--muted); margin: 0.25rem 0 0; }
+    .section-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .section-head h2 { margin: 0; }
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+    .count-pill {
+      font-size: 0.75rem;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.15rem 0.5rem;
+    }
   </style>
 </head>
 <body>
@@ -197,15 +275,29 @@
       <div id="actionStatus" class="notes">Ready.</div>
     </section>
 
+    <!-- Latest for selected device (sync history / last clinical) -->
+    <section class="card" id="deviceLatestCard">
+      <div class="section-head">
+        <h2 id="deviceLatestTitle">Device latest</h2>
+        <span class="count-pill" id="deviceLatestSource">from history</span>
+      </div>
+      <div id="deviceVitals" class="vitals-grid"></div>
+      <div class="panel-meta" id="deviceLatestMeta">Select a device and Sync, or pick a saved device.</div>
+    </section>
+
+    <!-- Live stream (only meaningful while active; layout follows brand) -->
     <section class="card" id="liveCard">
-      <h2>
-        <span class="live-dot" id="liveDot"></span>
-        <span id="liveTitle">Latest vitals</span>
-        <span id="liveModeLabel" style="font-weight:400;color:var(--muted)">(by selected device)</span>
-      </h2>
-      <div class="hero" id="hero">—</div>
-      <div class="sub" id="liveMeta">Waiting for Live start or Sync…</div>
-      <div class="notes" id="liveClock">Last UI update: —</div>
+      <div class="section-head">
+        <h2>
+          <span class="live-dot" id="liveDot"></span>
+          <span id="liveTitle">Live stream</span>
+        </h2>
+        <span class="count-pill" id="liveModeLabel">idle</span>
+      </div>
+      <div id="liveVitals" class="vitals-grid"></div>
+      <div class="panel-meta" id="liveMeta">Not streaming. Use Live start for continuous SpO2 (Masimo).</div>
+      <div class="panel-meta" id="liveClock">Last UI update: —</div>
+      <div class="hint" id="liveHint">Pick a brand — live layout adapts (SpO2 / BP / temp / glucose).</div>
     </section>
 
     <section class="card">
@@ -229,7 +321,15 @@
     </section>
 
     <section class="card">
-      <h2>Recent readings (newest first by timestamp)</h2>
+      <div class="section-head">
+        <h2>Readings</h2>
+        <div class="filter-bar">
+          <button type="button" class="secondary active-filter" id="btnFilterDevice">This device</button>
+          <button type="button" class="secondary" id="btnFilterAll">All devices</button>
+          <span class="count-pill" id="readCount">0</span>
+        </div>
+      </div>
+      <p class="notes" id="readFilterNote">Showing readings for the selected MAC (device history timestamps).</p>
       <table>
         <thead>
           <tr><th>When</th><th>Brand</th><th>Type</th><th>Values</th><th>MAC</th></tr>
@@ -248,10 +348,13 @@
     const $ = (id) => document.getElementById(id);
     const logEl = $("log");
     let brands = [];
-    let liveTimer = null;       // HTTP poll fallback
-    let liveWs = null;          // primary real-time channel
+    let liveTimer = null;
+    let liveWs = null;
     let lastVitalsCount = -1;
-    let liveStreamWanted = false; // true after Live start until stop
+    let liveStreamWanted = false;
+    let filterMode = "device"; // "device" | "all"
+    let lastDeviceReading = null; // last clinical for selected MAC
+    let lastLiveSnapshot = null;
 
     function log(msg, cls) {
       const t = new Date().toLocaleTimeString();
@@ -299,6 +402,10 @@
       return brands.find((b) => b.id === $("brand").value) || null;
     }
 
+    function selectedMac() {
+      return ($("mac").value || "").trim().toUpperCase();
+    }
+
     function fillBrands(list) {
       brands = list;
       const sel = $("brand");
@@ -317,29 +424,37 @@
       if (!b) return;
       $("model").value = b.default_model || "";
       $("brandNotes").textContent = b.notes || "";
-      updateLivePanelTitle(b.id);      saveDeviceSelection();
+      updateLiveChrome(b.id, false);
+      renderEmptyVitals($("deviceVitals"), brandVitalKind(b.id));
+      $("deviceLatestTitle").textContent = devicePanelTitle(b.id);
+      saveDeviceSelection();
+      // Refresh history for new brand/MAC filter
+      refreshReadingsOnly().catch(() => {});
     }
 
     function saveDeviceSelection() {
-      localStorage.setItem('med_ble_brand', $('brand').value);
-      localStorage.setItem('med_ble_mac', $('mac').value);
-      localStorage.setItem('med_ble_model', $('model').value);
+      localStorage.setItem("med_ble_brand", $("brand").value);
+      localStorage.setItem("med_ble_mac", $("mac").value);
+      localStorage.setItem("med_ble_model", $("model").value);
     }
 
     function restoreDeviceSelection() {
-      const brand = localStorage.getItem('med_ble_brand');
-      const mac = localStorage.getItem('med_ble_mac');
-      const model = localStorage.getItem('med_ble_model');
+      const brand = localStorage.getItem("med_ble_brand");
+      const mac = localStorage.getItem("med_ble_mac");
+      const model = localStorage.getItem("med_ble_model");
       if (brand) {
-        $('brand').value = brand;
+        $("brand").value = brand;
         onBrandChange();
       }
-      if (mac) $('mac').value = mac;
-      if (model) $('model').value = model;    }
+      if (mac) $("mac").value = mac;
+      if (model) $("model").value = model;
+    }
 
     function selectScan(mac, name) {
       $("mac").value = mac;
+      saveDeviceSelection();
       log(`Selected ${mac} ${name || ""}`);
+      refreshReadingsOnly().catch(() => {});
     }
 
     function renderScan(devices) {
@@ -376,13 +491,15 @@
           onBrandChange();
           $("model").value = d.model || $("model").value;
           $("mac").value = d.mac;
+          saveDeviceSelection();
           log(`Loaded saved device ${d.mac}`);
+          refreshReadingsOnly().catch(() => {});
         };
         tb.appendChild(tr);
       });
     }
 
-    /** What kind of vitals this brand uses (for labels / live status). */
+    /** Vital layout kind for brand. */
     function brandVitalKind(brandId) {
       const id = (brandId || ($("brand") && $("brand").value) || "").toLowerCase();
       if (id === "masimo") return "spo2";
@@ -401,67 +518,87 @@
       return brandVitalKind(r.brand);
     }
 
+    function devicePanelTitle(brandId) {
+      const kind = brandVitalKind(brandId);
+      return ({
+        spo2: "Device latest · SpO2 / PR",
+        bp: "Device latest · Blood pressure",
+        temp: "Device latest · Temperature",
+        glucose: "Device latest · Glucose",
+        generic: "Device latest",
+      })[kind] || "Device latest";
+    }
+
     function fmtReading(r) {
       if (!r) return "—";
       const kind = vitalKindFromRow(r);
-      if (kind === "spo2" || r.reading_type === "spo2" || r.spo2 != null)
+      if (kind === "spo2")
         return `SpO2 ${r.spo2 ?? "—"}%  PR ${r.pulse_rate ?? "—"}  PI ${r.perfusion_index ?? "—"}`;
-      if (kind === "bp" || r.reading_type === "bp" || r.systolic != null)
+      if (kind === "bp")
         return `SYS ${r.systolic ?? "—"}  DIA ${r.diastolic ?? "—"}  PULSE ${r.pulse_rate ?? "—"}`;
-      if (kind === "temp" || r.reading_type === "temp" || r.temperature != null)
-        return `Temp ${r.temperature ?? "—"} °`;
-      if (kind === "glucose" || r.reading_type === "glucose" || r.glucose_mg_dl != null)
+      if (kind === "temp")
+        return `Temp ${r.temperature ?? "—"} °C`;
+      if (kind === "glucose")
         return `Glucose ${r.glucose_mg_dl ?? "—"} mg/dL`;
-      return r.reading_type || JSON.stringify(r.payload || r).slice(0, 80);
+      return r.reading_type || "—";
     }
 
-    function liveWaitingHint(brandId, status) {
-      const kind = brandVitalKind(brandId);
-      const st = status || "connecting";
-      if (kind === "spo2")
-        return `LIVE ${st}… waiting for SpO2/PR (finger in sensor)`;
-      if (kind === "bp")
-        return `LIVE ${st}… waiting for BP (measure / transfer mode as needed)`;
-      if (kind === "temp")
-        return `LIVE ${st}… waiting for temperature (measure first — short BLE window)`;
-      if (kind === "glucose")
-        return `LIVE ${st}… waiting for glucose data`;
-      return `LIVE ${st}… waiting for device data`;
+    function fmtNum(v, digits) {
+      if (v == null || v === "") return "—";
+      const n = Number(v);
+      if (Number.isNaN(n)) return String(v);
+      if (digits != null) return n.toFixed(digits);
+      return String(n);
     }
 
-    function liveStatusLine(row, via, brandId) {
-      const kind = vitalKindFromRow(row) || brandVitalKind(brandId);
-      const v = via || "ws";
-      if (!row) return `LIVE · real-time ${v}`;
-      if (kind === "spo2")
-        return `LIVE SpO2 ${row.spo2 ?? "—"}%  PR ${row.pulse_rate ?? "—"}  · real-time ${v}`;
-      if (kind === "bp")
-        return `LIVE SYS ${row.systolic ?? "—"}  DIA ${row.diastolic ?? "—"}  PR ${row.pulse_rate ?? "—"}  · real-time ${v}`;
-      if (kind === "temp")
-        return `LIVE Temp ${row.temperature ?? "—"} °  · real-time ${v}`;
-      if (kind === "glucose")
-        return `LIVE Glucose ${row.glucose_mg_dl ?? "—"}  · real-time ${v}`;
-      return `LIVE ${fmtReading(row)}  · real-time ${v}`;
+    function renderEmptyVitals(container, kind) {
+      const tiles = tilesForKind(kind, null);
+      container.innerHTML = tiles;
     }
 
-    function updateLivePanelTitle(brandId) {
-      const kind = brandVitalKind(brandId);
-      const titles = {
-        spo2: "Live SpO2 / PR",
-        bp: "Live blood pressure",
-        temp: "Live temperature",
-        glucose: "Live glucose",
-        generic: "Latest vitals",
-      };
-      const modes = {
-        spo2: "(stream · WebSocket)",
-        bp: "(sync / session)",
-        temp: "(sync after measure)",
-        glucose: "(sync)",
-        generic: "(by selected device)",
-      };
-      $("liveTitle").textContent = titles[kind] || titles.generic;
-      $("liveModeLabel").textContent = modes[kind] || modes.generic;
+    function tilesForKind(kind, row) {
+      const r = row || {};
+      if (kind === "spo2") {
+        return `
+          <div class="vital-tile spo2"><div class="vlabel">SpO2</div><div class="vvalue">${fmtNum(r.spo2)}</div><div class="vunit">%</div></div>
+          <div class="vital-tile pr"><div class="vlabel">Pulse</div><div class="vvalue">${fmtNum(r.pulse_rate)}</div><div class="vunit">bpm</div></div>
+          <div class="vital-tile pi"><div class="vlabel">PI</div><div class="vvalue">${fmtNum(r.perfusion_index, 2)}</div><div class="vunit">perfusion</div></div>`;
+      }
+      if (kind === "bp") {
+        return `
+          <div class="vital-tile bp-sys"><div class="vlabel">Systolic</div><div class="vvalue">${fmtNum(r.systolic)}</div><div class="vunit">mmHg</div></div>
+          <div class="vital-tile bp-dia"><div class="vlabel">Diastolic</div><div class="vvalue">${fmtNum(r.diastolic)}</div><div class="vunit">mmHg</div></div>
+          <div class="vital-tile pr"><div class="vlabel">Pulse</div><div class="vvalue">${fmtNum(r.pulse_rate)}</div><div class="vunit">bpm</div></div>`;
+      }
+      if (kind === "temp") {
+        return `
+          <div class="vital-tile temp"><div class="vlabel">Temperature</div><div class="vvalue">${fmtNum(r.temperature, 1)}</div><div class="vunit">°C</div></div>
+          <div class="vital-tile pr"><div class="vlabel">Pulse</div><div class="vvalue">${fmtNum(r.pulse_rate)}</div><div class="vunit">bpm</div></div>`;
+      }
+      if (kind === "glucose") {
+        return `
+          <div class="vital-tile glucose"><div class="vlabel">Glucose</div><div class="vvalue">${fmtNum(r.glucose_mg_dl)}</div><div class="vunit">mg/dL</div></div>`;
+      }
+      return `<div class="vital-empty">No structured vitals for this brand yet.</div>`;
+    }
+
+    function renderVitalsPanel(containerId, row, opts) {
+      const el = $(containerId);
+      const kind = row ? vitalKindFromRow(row) : brandVitalKind(opts && opts.brandId);
+      if (!row) {
+        el.innerHTML = tilesForKind(kind, null);
+        return;
+      }
+      const prev = el.dataset.sig || "";
+      const sig = fmtReading(row);
+      el.innerHTML = tilesForKind(kind, row);
+      el.dataset.sig = sig;
+      if (opts && opts.flash && sig !== prev && sig !== "—") {
+        el.querySelectorAll(".vital-tile").forEach((t) => {
+          t.classList.add("flash");
+          setTimeout(() => t.classList.remove("flash"), 200);
+        });
+      }
     }
 
     function readingTime(r) {
@@ -480,8 +617,15 @@
     function renderReadings(rows) {
       const tb = $("readBody");
       tb.innerHTML = "";
-      // Always newest measurement first (by device timestamp)
-      sortByTimeDesc(rows).forEach((r) => {
+      const sorted = sortByTimeDesc(rows);
+      $("readCount").textContent = `${sorted.length} row(s)`;
+      if (!sorted.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="5" style="color:var(--muted)">No readings for this filter. Sync a device first.</td>`;
+        tb.appendChild(tr);
+        return;
+      }
+      sorted.forEach((r) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${readingTime(r)}</td>
@@ -493,65 +637,110 @@
       });
     }
 
-    function showLatest(row, meta, opts) {
-      const hero = $("hero");
-      const text = row ? fmtReading(row) : "—";
-      const prev = hero.textContent;
-      hero.textContent = text;
-      const when = row ? readingTime(row) : "";
-      $("liveMeta").textContent = [meta || "", when ? `time ${when}` : ""]
-        .filter(Boolean)
-        .join(" · ");
-      $("liveClock").textContent =
-        "Last UI update: " + new Date().toLocaleTimeString() +
-        (opts && opts.via ? " · via " + opts.via : "");
-      // Flash only when the reading text actually changes
-      if (opts && opts.flash && text !== prev && text !== "—") {
-        hero.classList.remove("flash");
-        void hero.offsetWidth;
-        hero.classList.add("flash");
-        setTimeout(() => hero.classList.remove("flash"), 180);
+    function setDeviceLatest(row, sourceLabel) {
+      lastDeviceReading = row || null;
+      const brandId = (row && row.brand) || $("brand").value;
+      $("deviceLatestTitle").textContent = devicePanelTitle(brandId);
+      $("deviceLatestSource").textContent = sourceLabel || "from history";
+      renderVitalsPanel("deviceVitals", row, { brandId, flash: true });
+      if (row) {
+        $("deviceLatestMeta").textContent = [
+          brandId,
+          row.mac || selectedMac(),
+          readingTime(row) ? `measured ${readingTime(row)}` : "",
+          fmtReading(row),
+        ].filter(Boolean).join(" · ");
+      } else {
+        $("deviceLatestMeta").textContent =
+          "No clinical readings for this device yet. Run Sync / Read.";
       }
+    }
+
+    function updateLiveChrome(brandId, active) {
+      const kind = brandVitalKind(brandId);
+      const titles = {
+        spo2: "Live stream · SpO2 / PR",
+        bp: "Live stream · Blood pressure",
+        temp: "Live stream · Temperature",
+        glucose: "Live stream · Glucose",
+        generic: "Live stream",
+      };
+      $("liveTitle").textContent = titles[kind] || titles.generic;
+      $("liveModeLabel").textContent = active ? "LIVE" : "idle";
+
+      const hints = {
+        spo2: "Streaming device: keep finger in sensor. WebSocket pushes ~1 Hz. Auto-reconnect if silent.",
+        bp: "BP cuffs are history devices — prefer Sync / Read for full EEPROM dump. Live only holds a session.",
+        temp: "NT-100B: measure first (BLE ~1–2 min window), then Live/Sync quickly.",
+        glucose: "Glucose: Sync after measurement. Live is limited.",
+        generic: "Live layout follows the selected brand.",
+      };
+      const hint = $("liveHint");
+      hint.textContent = hints[kind] || hints.generic;
+      hint.className = "hint " + (kind === "spo2" ? "stream" : kind === "bp" || kind === "temp" ? "warn" : "");
+    }
+
+    function liveWaitingHint(brandId, status) {
+      const kind = brandVitalKind(brandId);
+      const st = status || "connecting";
+      if (kind === "spo2") return `LIVE ${st}… waiting for SpO2/PR (finger in sensor)`;
+      if (kind === "bp") return `LIVE ${st}… waiting for BP packet`;
+      if (kind === "temp") return `LIVE ${st}… waiting for temperature`;
+      if (kind === "glucose") return `LIVE ${st}… waiting for glucose`;
+      return `LIVE ${st}… waiting for data`;
     }
 
     function applyLiveSnapshot(L, via) {
       if (!L) return;
+      lastLiveSnapshot = L;
       const n = L.vitals_count || 0;
       const pk = L.packets || 0;
       const active = !!L.active;
-      const brandId = L.brand || ($("brand") && $("brand").value) || "";
-      // Title follows live session brand when streaming, else selected brand
-      updateLivePanelTitle(brandId);
+      const brandId = L.brand || $("brand").value || "";
+
+      // Only drive LIVE panel when session is active (or we still want stream)
+      if (!active && !liveStreamWanted) {
+        $("liveDot").classList.remove("on");
+        $("liveModeLabel").textContent = L.status || "idle";
+        // Do NOT overwrite device-latest with stale live.latest
+        return;
+      }
+
+      updateLiveChrome(brandId, active);
       $("liveDot").classList.toggle(
         "on",
-        active && (L.status === "live" || L.status === "streaming" || L.status === "reconnecting")
+        active && ["live", "streaming", "reconnecting", "connected", "connecting"].includes(L.status)
       );
+
       if (L.latest) {
-        showLatest(
-          L.latest,
-          `${active ? "LIVE" : L.status} · ${brandId} · vitals#${n} · pkts#${pk} · ${L.mac || ""}`,
-          { flash: n !== lastVitalsCount, via: via || "ws" }
-        );
+        renderVitalsPanel("liveVitals", L.latest, {
+          brandId,
+          flash: n !== lastVitalsCount,
+        });
+        $("liveMeta").textContent =
+          `${L.status} · ${brandId} · vitals#${n} · pkts#${pk} · ${L.mac || ""} · via ${via || "ws"}`;
+        $("liveClock").textContent =
+          "Last UI update: " + new Date().toLocaleTimeString() +
+          (via ? " · " + via : "");
         if (active) {
-          setStatus(liveStatusLine(L.latest, via || "ws", brandId), "status-run");
+          setStatus(
+            `LIVE ${fmtReading(L.latest)} · real-time ${via || "ws"}`,
+            "status-run"
+          );
         }
       } else if (active) {
-        setStatus(
-          liveWaitingHint(brandId, L.status || "connecting"),
-          "status-run"
-        );
+        renderEmptyVitals($("liveVitals"), brandVitalKind(brandId));
+        setStatus(liveWaitingHint(brandId, L.status), "status-run");
         $("liveMeta").textContent =
           `${L.status} · ${brandId} · ${L.mac || ""} · via ${via || "ws"}`;
       }
+
       if (n !== lastVitalsCount && n > 0) lastVitalsCount = n;
 
       if (
         liveStreamWanted &&
         !active &&
-        L.status !== "starting" &&
-        L.status !== "connecting" &&
-        L.status !== "streaming" &&
-        L.status !== "reconnecting"
+        !["starting", "connecting", "streaming", "reconnecting"].includes(L.status)
       ) {
         liveStreamWanted = false;
         stopLivePolling();
@@ -587,8 +776,7 @@
       liveWs.onopen = () => {
         setWsBadge("WS: live push ON", true);
         log("WebSocket connected — real-time push enabled");
-        // Prefer WS; light poll only as safety net
-        startLivePollingFallback(2000);
+        startLivePollingFallback(2500);
       };
       liveWs.onmessage = (ev) => {
         try {
@@ -596,13 +784,10 @@
           if (data.live) applyLiveSnapshot(data.live, data.event === "tick" ? "ws-tick" : "ws");
         } catch (_) {}
       };
-      liveWs.onerror = () => {
-        setWsBadge("WS: error", false);
-      };
+      liveWs.onerror = () => setWsBadge("WS: error", false);
       liveWs.onclose = () => {
         setWsBadge("WS: reconnecting…", false);
         liveWs = null;
-        // Fallback poll faster if WS drops during stream
         if (liveStreamWanted) startLivePollingFallback(400);
         setTimeout(connectLiveWs, 1500);
       };
@@ -625,38 +810,94 @@
       }
     }
 
-    async function refreshAll() {
-      const [devs, reads, live] = await Promise.all([
-        api("/devices"),
-        api("/readings?limit=40"),
-        api("/live/latest"),
-      ]);
-      renderDevices(devs.devices || []);
-      const sorted = sortByTimeDesc(reads.readings || []);
+    async function fetchReadingsForUi() {
+      const mac = selectedMac();
+      let url = "/readings?limit=80";
+      if (filterMode === "device" && mac) {
+        url = `/readings?mac=${encodeURIComponent(mac)}&limit=80`;
+      } else if (filterMode === "device" && !mac) {
+        // No MAC yet — still filter by brand so Omron isn't buried under Masimo
+        const brand = $("brand").value;
+        if (brand) url = `/readings?brand=${encodeURIComponent(brand)}&limit=80`;
+      }
+      const data = await api(url);
+      return data.readings || [];
+    }
+
+    async function refreshReadingsOnly() {
+      const rows = await fetchReadingsForUi();
+      const sorted = sortByTimeDesc(rows);
       renderReadings(sorted);
-      const L = live.live || {};
-      if (L.latest) {
-        showLatest(L.latest, `live ${L.status} · ${L.brand} · ${L.mac}`);
-      } else if (sorted[0]) {
-        const r = sorted[0];
-        showLatest(r, `latest by time · ${r.brand} · ${r.mac || ""}`);
+
+      const mac = selectedMac();
+      $("readFilterNote").textContent =
+        filterMode === "device"
+          ? mac
+            ? `Showing history for ${mac} (device measurement timestamps — not “just synced”).`
+            : `No MAC selected — showing brand “${$("brand").value}” only. Pick a device MAC.`
+          : "Showing all devices (newest measurement time first). Live SpO2 can bury older BP history.";
+
+      // Device latest panel: prefer selected MAC clinical rows
+      if (sorted[0]) {
+        setDeviceLatest(
+          sorted[0],
+          filterMode === "device" ? "this device · newest by time" : "all devices · newest"
+        );
+      } else {
+        setDeviceLatest(null, "no data");
       }
     }
 
+    async function refreshAll() {
+      const [devs, live] = await Promise.all([
+        api("/devices"),
+        api("/live/latest"),
+      ]);
+      renderDevices(devs.devices || []);
+      await refreshReadingsOnly();
+
+      const L = live.live || {};
+      if (L.active || liveStreamWanted) {
+        applyLiveSnapshot(L, "refresh");
+      } else {
+        $("liveDot").classList.remove("on");
+        $("liveModeLabel").textContent = L.status || "idle";
+        updateLiveChrome($("brand").value, false);
+        // Keep live panel empty-ish when idle; device panel owns history
+        if (!L.active) {
+          renderEmptyVitals($("liveVitals"), brandVitalKind($("brand").value));
+          $("liveMeta").textContent =
+            "Not streaming. Device latest (above) shows last Sync/Read values.";
+        }
+      }
+    }
+
+    function setFilter(mode) {
+      filterMode = mode;
+      $("btnFilterDevice").classList.toggle("active-filter", mode === "device");
+      $("btnFilterAll").classList.toggle("active-filter", mode === "all");
+      refreshReadingsOnly().catch((e) => log(String(e), "status-err"));
+    }
+
     function busy(on) {
-      ["btnScan","btnPair","btnRepair","btnSync","btnLive","btnSave"].forEach((id) => {
+      ["btnScan", "btnPair", "btnRepair", "btnSync", "btnLive", "btnSave"].forEach((id) => {
         $(id).disabled = !!on;
       });
     }
 
-    $("brand").onchange = onBrandChange;    $('mac').onchange = saveDeviceSelection;
-    $('model').onchange = saveDeviceSelection;
+    $("brand").onchange = onBrandChange;
+    $("mac").onchange = () => {
+      saveDeviceSelection();
+      refreshReadingsOnly().catch(() => {});
+    };
+    $("model").onchange = saveDeviceSelection;
+    $("btnFilterDevice").onclick = () => setFilter("device");
+    $("btnFilterAll").onclick = () => setFilter("all");
+
     $("btnScan").onclick = async () => {
       busy(true);
       setStatus("Scanning…", "status-run");
       try {
-        const brand = $("brand").value;
-        // Broad scan (no brand filter) finds new devices more reliably
         const data = await api("/scan", {
           method: "POST",
           body: JSON.stringify({ brand: null, timeout: 8 }),
@@ -696,7 +937,10 @@
         return;
       }
       busy(true);
-      setStatus(repair ? "Re-pairing… accept Windows dialog" : "Pairing… accept Windows dialog", "status-run");
+      setStatus(
+        repair ? "Re-pairing… accept Windows dialog" : "Pairing… accept Windows dialog",
+        "status-run"
+      );
       try {
         const data = await api("/pair", {
           method: "POST",
@@ -733,21 +977,20 @@
         return;
       }
       busy(true);
-      const omron = $("brand").value === "omron";
-      const isAnd = $("brand").value === "and";
-      const isMasimo = $("brand").value === "masimo";
-      const isThermo = $("brand").value === "thermo";
-      if (isMasimo) {
-        log("Masimo: Sync is a short snapshot. For continuous SpO2 use Live start.");
-      }
-      if (isThermo) {
-        log("NT-100B: measure first, then Sync within ~2 min while BLE is on.");
-      }
+      const brandId = $("brand").value;
+      const omron = brandId === "omron";
+      const isAnd = brandId === "and";
+      const isMasimo = brandId === "masimo";
+      const isThermo = brandId === "thermo";
+      if (isMasimo) log("Masimo: Sync is a short snapshot. For continuous SpO2 use Live start.");
+      if (isThermo) log("NT-100B: measure first, then Sync within ~2 min while BLE is on.");
+      if (omron) log("Omron: reading EEPROM history (up to 30 slots). Dashboard filters to this MAC.");
+
       setStatus(
         omron
           ? "Omron sync… (button only if FE4A fails)"
           : isAnd
-          ? "A&D/Nipro sync… waiting for full Indicate dump (up to 30)…"
+          ? "A&D/Nipro sync… waiting for full Indicate dump…"
           : isMasimo
           ? "Masimo short sync (use Live for continuous SpO2)…"
           : isThermo
@@ -756,24 +999,66 @@
         "status-run"
       );
       try {
+        // Ensure filter is on this device so results are visible
+        filterMode = "device";
+        $("btnFilterDevice").classList.add("active-filter");
+        $("btnFilterAll").classList.remove("active-filter");
+
         const data = await api("/sync", {
           method: "POST",
           body: JSON.stringify({
-            brand: $("brand").value,
+            brand: brandId,
             mac: $("mac").value,
             model: $("model").value,
             listen_s: omron ? 45 : isAnd ? 60 : isThermo ? 20 : 30,
           }),
         });
-        if (data.latest) showLatest(data.latest, `sync stored=${data.stored}`);
-        setStatus(`Sync OK · stored ${data.stored} clinical reading(s)`, "status-ok");
-        log(`Sync OK stored=${data.stored}`);
+
+        // Immediate dashboard update from sync payload (don't wait / don't get buried)
+        if (data.latest) {
+          setDeviceLatest(
+            { ...data.latest, brand: brandId, mac: data.mac },
+            `just synced · stored ${data.stored}`
+          );
+        }
+        if (data.readings && data.readings.length) {
+          renderReadings(data.readings);
+          $("readFilterNote").textContent =
+            `This sync: ${data.total || data.readings.length} clinical · stored ${data.stored}` +
+            (data.skipped_duplicates
+              ? ` · skipped ${data.skipped_duplicates} duplicate(s)`
+              : "");
+        }
+
+        const dupNote = data.skipped_duplicates
+          ? ` (${data.skipped_duplicates} already in DB)`
+          : "";
+        setStatus(
+          `Sync OK · ${data.stored} new · ${data.total || data.stored} clinical${dupNote}`,
+          "status-ok"
+        );
+        log(
+          `Sync OK stored=${data.stored} total=${data.total || data.stored}` +
+            (data.skipped_duplicates ? ` dups_skipped=${data.skipped_duplicates}` : "")
+        );
         if (data.warning) {
           log(data.warning, "status-err");
           setStatus(data.warning, "status-err");
         }
         (data.tips || []).forEach((t) => log("  → " + t));
-        await refreshAll();
+
+        // Reload filtered history from SQLite (this MAC)
+        await refreshReadingsOnly();
+        const devs = await api("/devices");
+        renderDevices(devs.devices || []);
+
+        // Re-assert latest from sync (refresh might pick older by measured_at if empty filter)
+        if (data.latest) {
+          setDeviceLatest(
+            { ...data.latest, brand: brandId, mac: data.mac },
+            `sync · newest of ${data.total || data.stored}`
+          );
+        }
       } catch (e) {
         showError(e);
       } finally {
@@ -788,19 +1073,20 @@
       }
       const brandId = $("brand").value;
       const kind = brandVitalKind(brandId);
-      updateLivePanelTitle(brandId);
+      updateLiveChrome(brandId, true);
+      renderEmptyVitals($("liveVitals"), kind);
       if (kind === "spo2") {
         log("Masimo: continuous SpO2/PR stream (Live). Keep finger in sensor.");
       } else if (kind === "bp") {
-        log("BP brands: Live keeps a session; for full history prefer Sync / Read.");
+        log("BP brands: prefer Sync / Read for full history. Live is a short session only.");
       } else if (kind === "temp") {
         log("NT-100B: measure first (BLE ~2 min), then Live/Sync quickly.");
       } else {
-        log("Live session for selected device — vitals format follows brand.");
+        log("Live session — vitals layout follows brand.");
       }
       busy(true);
       try {
-        connectLiveWs(); // ensure WS is up before stream starts
+        connectLiveWs();
         const data = await api("/live/start", {
           method: "POST",
           body: JSON.stringify({
@@ -812,15 +1098,12 @@
         });
         liveStreamWanted = true;
         lastVitalsCount = -1;
-        const streamHint =
+        setStatus(
           kind === "spo2"
-            ? "SpO2 stream + auto-reconnect"
-            : kind === "bp"
-            ? "BP session (use Sync for multi-record history)"
-            : kind === "temp"
-            ? "temp session (measure first)"
-            : "live session";
-        setStatus(`LIVE on (${streamHint}) — WebSocket real-time`, "status-run");
+            ? "LIVE SpO2 stream + auto-reconnect — WebSocket"
+            : `LIVE session (${kind}) — WebSocket`,
+          "status-run"
+        );
         log(`Live start ${data.mac} [${brandId}] — ${data.message || ""}`);
         if (data.auto_reconnect) log("Auto-reconnect enabled for this stream");
         startLivePollingFallback(800);
@@ -838,6 +1121,7 @@
         await api("/live/stop", { method: "POST", body: "{}" });
         stopLivePolling();
         $("liveDot").classList.remove("on");
+        $("liveModeLabel").textContent = "stopped";
         setStatus("Live stop requested", "status-ok");
         log("Live stop");
         await refreshAll();
@@ -846,14 +1130,24 @@
       }
     };
 
-    $("btnRefresh").onclick = () => refreshAll().catch((e) => log(String(e), "status-err"));
+    $("btnRefresh").onclick = () =>
+      refreshAll().catch((e) => log(String(e), "status-err"));
 
     (async () => {
       try {
         const b = await api("/brands");
-        fillBrands(b.brands || []);        restoreDeviceSelection();        await refreshAll();
+        fillBrands(b.brands || []);
+        restoreDeviceSelection();
+        updateLiveChrome($("brand").value, false);
+        renderEmptyVitals($("deviceVitals"), brandVitalKind($("brand").value));
+        renderEmptyVitals($("liveVitals"), brandVitalKind($("brand").value));
+        await refreshAll();
         connectLiveWs();
-        log("Ready · " + (b.brands || []).length + " brands · WebSocket for live UI");
+        log(
+          "Ready · " +
+            (b.brands || []).length +
+            " brands · readings filter = this device · live layout per brand"
+        );
       } catch (e) {
         log("Init failed: " + e, "status-err");
       }

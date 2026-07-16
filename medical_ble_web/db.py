@@ -228,6 +228,63 @@ def end_session(
         )
 
 
+def has_similar_reading(
+    *,
+    device_id: Optional[int],
+    reading_type: str,
+    measured_at: Optional[str],
+    systolic: Optional[float] = None,
+    diastolic: Optional[float] = None,
+    pulse_rate: Optional[float] = None,
+    spo2: Optional[float] = None,
+    temperature: Optional[float] = None,
+    glucose_mg_dl: Optional[float] = None,
+) -> bool:
+    """
+    True if an equivalent clinical row already exists (prevents re-sync duplicates).
+
+    Matches device + type + measured_at + primary vital fields.
+    Live SpO2 streams intentionally call insert_reading without this check
+    when values change (see ble_jobs live path).
+    """
+    if not device_id or not measured_at:
+        return False
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id FROM readings
+            WHERE device_id = ?
+              AND reading_type = ?
+              AND measured_at = ?
+              AND (systolic IS ? OR systolic = ?)
+              AND (diastolic IS ? OR diastolic = ?)
+              AND (pulse_rate IS ? OR pulse_rate = ?)
+              AND (spo2 IS ? OR spo2 = ?)
+              AND (temperature IS ? OR temperature = ?)
+              AND (glucose_mg_dl IS ? OR glucose_mg_dl = ?)
+            LIMIT 1
+            """,
+            (
+                device_id,
+                reading_type,
+                measured_at,
+                systolic,
+                systolic,
+                diastolic,
+                diastolic,
+                pulse_rate,
+                pulse_rate,
+                spo2,
+                spo2,
+                temperature,
+                temperature,
+                glucose_mg_dl,
+                glucose_mg_dl,
+            ),
+        ).fetchone()
+        return row is not None
+
+
 def insert_reading(
     *,
     device_id: Optional[int],
@@ -244,7 +301,25 @@ def insert_reading(
     glucose_mg_dl: Optional[float] = None,
     payload: Optional[Dict[str, Any]] = None,
     raw_hex: str = "",
-) -> int:
+    dedupe: bool = False,
+) -> Optional[int]:
+    """
+    Insert a reading. If dedupe=True and an equivalent row exists, skip and return None.
+    """
+    measured = measured_at or _now()
+    if dedupe and has_similar_reading(
+        device_id=device_id,
+        reading_type=reading_type,
+        measured_at=measured_at,  # only dedupe when device supplied a timestamp
+        systolic=systolic,
+        diastolic=diastolic,
+        pulse_rate=pulse_rate,
+        spo2=spo2,
+        temperature=temperature,
+        glucose_mg_dl=glucose_mg_dl,
+    ):
+        return None
+
     with connect() as conn:
         cur = conn.execute(
             """
@@ -259,7 +334,7 @@ def insert_reading(
                 session_id,
                 brand,
                 reading_type,
-                measured_at or _now(),
+                measured,
                 systolic,
                 diastolic,
                 pulse_rate,
