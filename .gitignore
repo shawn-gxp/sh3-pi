@@ -1,4 +1,4 @@
-# Python
+# Python bytecode / venv (regenerate via setup_linux.sh)
 __pycache__/
 *.py[cod]
 *.pyo
@@ -15,30 +15,11 @@ env/
 .DS_Store
 Thumbs.db
 
-# Runtime artifacts and local exports
+# Logs only (keep CSV/db/pair configs — this is a dev share repo)
 *.log
-data/*.csv
-omblepy/*.csv
-*.cfa
-*.apkm
-**/extracted/
-**/decompiled/
-**/tools/
 
-omblepy/*.csv
-omblepy/backup_*.csv
+# Do not commit machine SSH public key helper
+GITHUB_SSH_KEY.md
 
-# Large reverse-engineering/tooling artifacts
-*.zip
-*.jar
-*.apk
-*.apkm
+# Optional huge OS packages if dropped in tree (rare)
 *.jmod
-datasheets/beurer/tools/
-datasheets/beurer/extracted/
-datasheets/beurer/decompiled/
-phoneblelog/*.cfa
-
-# Runtime local databases
-*.db
-medical_ble_web/data/*.db
