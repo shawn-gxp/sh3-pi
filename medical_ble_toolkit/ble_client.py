@@ -1704,11 +1704,59 @@ class MedicalBleClient:
             except Exception as exc:  # noqa: BLE001
                 log.debug("[DIS] %s unavailable: %s", label, exc)
 
+    def _latest_spo2_valid(self) -> Optional[bool]:
+        """
+        MightySat / SpO2 validity for duty-cycle.
+
+        True  — last clinical SpO2 is a real number (UI would show a value)
+        False — last SpO2 packet is invalid / sensor-off / None ("-")
+        None  — no SpO2-class reading yet
+        """
+        for r in reversed(self.readings or []):
+            spo2 = None
+            sensor_off = False
+            invalid = False
+            if isinstance(r, dict):
+                spo2 = r.get("spo2")
+                sensor_off = bool(r.get("sensor_off"))
+                invalid = bool(r.get("invalid"))
+                rtype = r.get("type") or r.get("reading_type") or ""
+                # skip non-clinical stream frames
+                if rtype in ("waveform", "ack", "nack", "device_info", "raw_message"):
+                    continue
+            else:
+                spo2 = getattr(r, "spo2", None)
+                sensor_off = bool(getattr(r, "sensor_off", False))
+                invalid = bool(getattr(r, "invalid", False))
+            # Only treat objects that look like pulse-ox rows
+            if spo2 is None and not sensor_off and not invalid:
+                # Could be BP / temp / unrelated — skip if no spo2 field at all
+                if not hasattr(r, "spo2") and not (
+                    isinstance(r, dict) and "spo2" in r
+                ):
+                    continue
+            if sensor_off or invalid:
+                return False
+            if spo2 is None:
+                return False
+            try:
+                v = float(spo2)
+            except (TypeError, ValueError):
+                return False
+            # 0 / nonsense treated as dash
+            if v <= 0 or v > 100:
+                return False
+            return True
+        return None
+
     async def listen(
         self,
         duration: float = 60.0,
         *,
         quiet_timeout: Optional[float] = None,
+        stream_good_hold_s: Optional[float] = None,
+        stream_invalid_exit_s: Optional[float] = None,
+        stream_no_data_grace_s: float = 8.0,
     ) -> None:
         """
         Wait for notifications.
@@ -1716,6 +1764,11 @@ class MedicalBleClient:
         quiet_timeout: if set (or defaulted for Beurer/A&D BP), end early after
         this many seconds with no new indications once at least one packet
         arrived — matches HealthManager Pro BTFlowTimer quiet-end behavior.
+
+        stream_good_hold_s / stream_invalid_exit_s (MightySat hub duty-cycle):
+          - accumulate time while SpO2 is valid; exit when good hold reached
+          - continuous invalid ("-") for stream_invalid_exit_s → exit
+          - no SpO2 yet counts as invalid after stream_no_data_grace_s
         """
         import time as _time
 
@@ -1746,13 +1799,22 @@ class MedicalBleClient:
         if quiet_timeout == 0.0:
             quiet_timeout = None
 
+        duty = (
+            stream_good_hold_s is not None or stream_invalid_exit_s is not None
+        )
         log.info(
             "Listening up to %.0fs (quiet_timeout=%s)%s",
             duration,
             f"{quiet_timeout:.1f}s" if quiet_timeout else "off",
-            " — STREAMING (no early quiet-end)"
-            if self.profile.id in ("mightysat",)
-            else " — device may auto-send history.",
+            (
+                f" — DUTY good={stream_good_hold_s}s invalid_exit={stream_invalid_exit_s}s"
+                if duty
+                else (
+                    " — STREAMING (no early quiet-end)"
+                    if self.profile.id in ("mightysat",)
+                    else " — device may auto-send history."
+                )
+            ),
         )
         log.info(
             "RE TIP: Watch for [HEX] lines. Correlate [TS] ms stamps with button presses."
@@ -1760,13 +1822,58 @@ class MedicalBleClient:
         log.info(
             "RE TIP: Every notification logs [TS] then [HEX] BEFORE [PARSE]."
         )
-        deadline = _time.monotonic() + max(0.5, duration)
+        listen_start = _time.monotonic()
+        deadline = listen_start + max(0.5, duration)
+        good_accum = 0.0
+        good_slice_start: Optional[float] = None
+        invalid_slice_start: Optional[float] = None
+        end_reason = ""
         try:
             while True:
                 now = _time.monotonic()
                 if now >= deadline:
+                    end_reason = "max_duration"
                     log.info("Listen max duration reached")
                     break
+                # --- MightySat duty-cycle (hub multi-device) ---
+                if duty and self.profile.id in ("mightysat",):
+                    valid = self._latest_spo2_valid()
+                    # After grace, "no packet yet" counts as dash/invalid
+                    if valid is None and (now - listen_start) >= float(
+                        stream_no_data_grace_s or 8.0
+                    ):
+                        valid = False
+                    if valid is True:
+                        invalid_slice_start = None
+                        if good_slice_start is None:
+                            good_slice_start = now
+                        good_accum = now - good_slice_start
+                        if (
+                            stream_good_hold_s is not None
+                            and good_accum >= float(stream_good_hold_s)
+                        ):
+                            end_reason = "good_hold"
+                            log.info(
+                                "MightySat duty: %.1fs valid SpO2 — releasing radio",
+                                good_accum,
+                            )
+                            break
+                    elif valid is False:
+                        good_slice_start = None  # reset continuous good window
+                        if invalid_slice_start is None:
+                            invalid_slice_start = now
+                        inv_age = now - invalid_slice_start
+                        if (
+                            stream_invalid_exit_s is not None
+                            and inv_age >= float(stream_invalid_exit_s)
+                        ):
+                            end_reason = "invalid_exit"
+                            log.info(
+                                "MightySat duty: SpO2 '-' / invalid for %.1fs — disconnect",
+                                inv_age,
+                            )
+                            break
+                    # valid is None within grace: wait for first sample
                 # NT-100B: if post-connect TICD already delivered a temp, finish
                 if (
                     self.profile.id == "nipro_nt100b"
@@ -1797,6 +1904,8 @@ class MedicalBleClient:
                     )
                     break
                 await asyncio.sleep(0.25)
+            if end_reason:
+                self._listen_end_reason = end_reason  # type: ignore[attr-defined]
         except asyncio.CancelledError:
             # Web/HTTP cancel often aborts listen mid-session. Keep any data
             # already collected (TICD dump / HTP) instead of failing the job.
@@ -1911,6 +2020,9 @@ class MedicalBleClient:
         *,
         quiet_timeout: Optional[float] = None,
         raise_on_error: bool = False,
+        stream_good_hold_s: Optional[float] = None,
+        stream_invalid_exit_s: Optional[float] = None,
+        stream_no_data_grace_s: float = 8.0,
     ) -> List[Any]:
         """
         Full session: connect → subscribe → device setup → listen → disconnect.
@@ -1919,7 +2031,9 @@ class MedicalBleClient:
           (Beurer/A&D early quiet-end). For streaming devices (MightySat) pass
           quiet_timeout=None and a long duration — do NOT use BP quiet-end.
         raise_on_error: if True, re-raise BLE failures (web live needs this).
+        stream_*: MightySat hub duty-cycle (good hold / invalid dash exit).
         """
+        self._listen_end_reason = ""  # type: ignore[attr-defined]
         # Streaming profiles must not inherit BP quiet-end from a prior default
         if quiet_timeout is None and self.profile.id in ("mightysat",):
             quiet_timeout = 0.0  # sentinel: listen() treats 0 as "off"
@@ -1959,7 +2073,13 @@ class MedicalBleClient:
                 await self.run_post_connect_setup()
             # 0.0 means disable quiet-end (continuous stream)
             qt = None if quiet_timeout == 0.0 else quiet_timeout
-            await self.listen(duration=duration, quiet_timeout=qt)
+            await self.listen(
+                duration=duration,
+                quiet_timeout=qt,
+                stream_good_hold_s=stream_good_hold_s,
+                stream_invalid_exit_s=stream_invalid_exit_s,
+                stream_no_data_grace_s=stream_no_data_grace_s,
+            )
         except asyncio.CancelledError:
             # UI/HTTP cancelled mid-listen — still return dump already done in setup
             log.warning(

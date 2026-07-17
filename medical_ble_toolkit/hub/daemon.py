@@ -129,9 +129,32 @@ class HubDaemon:
         self.status = HubStatus()
         self._last_health_log = 0.0
         self._workers: Dict[str, asyncio.Task] = {}
+        # After MightySat releases radio: hunt other brands first (duty-cycle)
+        self._prefer_others_until: float = 0.0
         self.conn_mgr = ConnectionManager(
             max_concurrent=int(getattr(self.cfg, "max_concurrent", 4) or 4),
             connect_gap_s=float(getattr(self.cfg, "connect_gap_s", 0.35) or 0.35),
+        )
+
+    def _prefer_others_active(self, now: Optional[float] = None) -> bool:
+        t = time.monotonic() if now is None else now
+        return t < float(self._prefer_others_until or 0.0)
+
+    def _mark_prefer_others(self, *, had_valid: bool = True) -> None:
+        """
+        After a Mighty session: free radio and scan other devices for
+        mightysat_others_window_s before re-attaching Mighty.
+        If values were all '-', keep preferring others a bit longer.
+        """
+        win = float(getattr(self.cfg, "mightysat_others_window_s", 5.0) or 5.0)
+        if not had_valid:
+            # No good SpO2 — keep hunting others / re-check later
+            win = max(win, 5.0)
+        self._prefer_others_until = time.monotonic() + win
+        log.info(
+            "[HUB] duty-cycle: prefer other devices for %.1fs (had_valid_spo2=%s)",
+            win,
+            had_valid,
         )
 
     def request_stop(self) -> None:
@@ -320,12 +343,30 @@ class HubDaemon:
                             break
             if adv is None:
                 continue
+            # Duty-cycle: after Mighty releases, skip Masimo briefly so others
+            # (NBP / NT / Omron) can transfer. Also hold off while any non-stream
+            # session is already dumping. If only Mighty is paired, still allow.
+            if brand == "masimo":
+                others_busy = any(
+                    (s.get("brand") or "").lower() != "masimo"
+                    for s in (self.conn_mgr.snapshot() or [])
+                )
+                if others_busy:
+                    continue
+                if self._prefer_others_active(now):
+                    other_paired = any(x["brand"] != "masimo" for x in roster)
+                    if other_paired:
+                        continue
             if is_always_on(brand):
                 if not self._omron_due(mac, now):
                     continue
                 reason = "omron_ad"
             else:
                 reason = "advertising"
+            pr = priority_rank(brand)
+            # While preferring others, demote stream brands so windowed go first
+            if self._prefer_others_active(now) and brand == "masimo":
+                pr = 90
             hits.append(
                 SessionTarget(
                     mac=mac,
@@ -333,7 +374,7 @@ class HubDaemon:
                     model=d.get("model") or "",
                     name=getattr(adv, "name", None) or name,
                     reason=reason,
-                    priority=priority_rank(brand),
+                    priority=pr,
                 )
             )
         hits.sort(key=lambda t: (t.priority, t.mac))
@@ -394,22 +435,29 @@ class HubDaemon:
             stored = int(result.get("stored") or 0)
             if brand == "masimo" and stored <= 0:
                 ok = False
+            # Mighty duty-cycle: after stream ends, hunt NBP/NT/Omron first
+            if brand == "masimo" or result.get("prefer_others"):
+                had_valid = bool(result.get("had_valid_spo2")) or stored > 0
+                self._mark_prefer_others(had_valid=had_valid)
             if ok:
                 self._last_success[mac] = time.monotonic()
+                end_r = result.get("listen_end_reason") or ""
                 self._publish(
                     last_result="ok",
                     last_stored=stored,
                     message=(
                         f"OK {brand} {mac}: stored {stored} "
-                        f"({target.reason}) "
+                        f"({target.reason}"
+                        f"{', ' + end_r if end_r else ''}) "
                         f"[{self.conn_mgr.active_count}/{self.conn_mgr.max_concurrent}]"
                     ),
                 )
                 log.info(
-                    "[HUB] WORKER ok brand=%s mac=%s stored=%d",
+                    "[HUB] WORKER ok brand=%s mac=%s stored=%d end=%s",
                     brand,
                     mac,
                     stored,
+                    end_r or "-",
                 )
                 if self.cfg.print_readings and result.get("readings"):
                     for row in (result.get("readings") or [])[:12]:
@@ -550,11 +598,18 @@ class HubDaemon:
 
                 self.status.scan_round += 1
                 rnd = self.status.scan_round
+                prefer = self._prefer_others_active(now)
+                prefer_left = max(0.0, self._prefer_others_until - now) if prefer else 0.0
                 self._publish(
                     message=(
                         f"Hunt #{rnd}: scan + spawn "
                         f"({n_active}/{self.conn_mgr.max_concurrent} active, "
                         f"{len(roster)} paired)"
+                        + (
+                            f" [prefer others {prefer_left:.1f}s]"
+                            if prefer
+                            else ""
+                        )
                     ),
                     scan_round=rnd,
                 )

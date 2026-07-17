@@ -518,12 +518,16 @@ async def job_sync(
     listen_s: float = 30.0,
     on_reading_cb: Optional[Callable[[], None]] = None,
     exclusive_radio: bool = True,
+    stream_good_hold_s: Optional[float] = None,
+    stream_invalid_exit_s: Optional[float] = None,
+    stream_no_data_grace_s: float = 8.0,
 ) -> Dict[str, Any]:
     """
     One-shot read/sync for the brand; store clinical readings in SQLite.
 
     exclusive_radio=True  — hold global BLE lock (UI / single-session).
     exclusive_radio=False — concurrent hub workers (multi BleakClient).
+    stream_*: MightySat hub duty-cycle (valid SpO2 hold / "-" exit).
     """
     brand = get_brand(brand_id)
     if not brand:
@@ -541,6 +545,7 @@ async def job_sync(
     sid = db.start_session("sync", device_id=device_id)
     stored = 0
     collected: List[Dict[str, Any]] = []
+    listen_end = ""
 
     try:
         async with _maybe_ble_lock(exclusive_radio):
@@ -773,6 +778,7 @@ async def job_sync(
                 from medical_ble_toolkit.nipro import post_measure as pm2
 
                 # MightySat: no quiet-end (stream until radio drops / duration)
+                # Hub passes stream_good_hold_s / stream_invalid_exit_s for duty-cycle.
                 if brand_id == "masimo" or profile_id == "mightysat":
                     qt = 0.0
                 else:
@@ -781,7 +787,11 @@ async def job_sync(
                     duration=duration,
                     connect_timeout=connect_to,
                     quiet_timeout=qt,
+                    stream_good_hold_s=stream_good_hold_s,
+                    stream_invalid_exit_s=stream_invalid_exit_s,
+                    stream_no_data_grace_s=stream_no_data_grace_s,
                 )
+                listen_end = getattr(client, "_listen_end_reason", "") or ""
                 # Ensure Nipro registry has exact name for hands-free
                 if brand.get("is_nipro") or brand_id.startswith("nipro"):
                     try:
@@ -829,6 +839,16 @@ async def job_sync(
             "latest": latest,
             "readings": ui_rows[:80],  # this sync batch for immediate dashboard
             "session_id": sid,
+            "listen_end_reason": listen_end,
+            "had_valid_spo2": bool(
+                any(
+                    r.get("spo2") is not None
+                    for r in collected
+                    if isinstance(r, dict)
+                )
+            )
+            if brand_id == "masimo"
+            else None,
         }
         if brand_id in ("thermo", "thermometer", "nipro_nt100b") and stored == 0:
             out["warning"] = (
@@ -1903,11 +1923,27 @@ async def _hub_run_session(target: Any) -> Dict[str, Any]:
 
     try:
         if is_stream(brand_id) or brand_id == "masimo":
-            listen = min(float(cfg.mightysat_live_max_s), 180.0)
+            # Duty-cycle: valid SpO2 up to good_hold_s, or "-" for invalid_exit_s → drop
+            good_hold = float(
+                getattr(cfg, "mightysat_good_hold_s", 20.0) or 20.0
+            )
+            inv_exit = float(
+                getattr(cfg, "mightysat_invalid_exit_s", 5.0) or 5.0
+            )
+            grace = float(
+                getattr(cfg, "mightysat_no_data_grace_s", 8.0) or 8.0
+            )
+            wall = min(
+                float(cfg.mightysat_live_max_s),
+                max(good_hold + inv_exit + 5.0, good_hold + 5.0),
+            )
             log.info(
-                "[HUB] MightySat stream session mac=%s max=%.0fs (finger must be in)",
+                "[HUB] MightySat duty-cycle mac=%s good_hold=%.0fs "
+                "invalid_exit=%.0fs wall=%.0fs (finger must be in for values)",
                 mac,
-                listen,
+                good_hold,
+                inv_exit,
+                wall,
             )
 
             def _on_ms() -> None:
@@ -1917,21 +1953,38 @@ async def _hub_run_session(target: Any) -> Dict[str, Any]:
                 brand_id="masimo",
                 mac=mac,
                 model=model or "MightySat",
-                listen_s=listen,
+                listen_s=wall,
                 on_reading_cb=_on_ms,
                 exclusive_radio=False,
+                stream_good_hold_s=good_hold,
+                stream_invalid_exit_s=inv_exit,
+                stream_no_data_grace_s=grace,
             )
             stored = int(result.get("stored") or 0)
+            had_valid = bool(result.get("had_valid_spo2"))
+            end_reason = result.get("listen_end_reason") or ""
             if cfg.print_readings and result.get("latest"):
                 log.info("[HUB][READING][live] %s", result.get("latest"))
-            ok = bool(result.get("ok", True)) and stored > 0
+            log.info(
+                "[HUB] MightySat end reason=%s stored=%d had_valid=%s",
+                end_reason or "unknown",
+                stored,
+                had_valid,
+            )
+            ok = bool(result.get("ok", True)) and (stored > 0 or had_valid)
             return {
                 "ok": ok,
                 "stored": stored,
                 "readings": result.get("readings") or [],
                 "latest": result.get("latest"),
-                "error": None if ok else "no SpO2 samples (finger out / BLE off?)",
+                "error": None
+                if ok
+                else "no SpO2 samples (finger out / values were '-')",
                 "session_id": result.get("session_id"),
+                "listen_end_reason": end_reason,
+                "had_valid_spo2": had_valid,
+                # Signal hub daemon to hunt other devices next
+                "prefer_others": True,
             }
 
         listen = cfg.receive_s(brand_id)

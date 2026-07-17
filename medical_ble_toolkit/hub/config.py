@@ -43,10 +43,17 @@ class HubConfig:
     nt100b_success_cooldown_s: float = 45.0
     nt100b_fail_cooldown_s: float = 4.0
 
-    # MightySat live stream — short cool-down (BLE only while finger on)
-    mightysat_live_max_s: float = 180.0  # cap hub hold time; stream ends on sensor-off
-    mightysat_success_cooldown_s: float = 2.0
-    mightysat_fail_cooldown_s: float = 2.0
+    # MightySat duty-cycle (multi-device friendly):
+    #   while SpO2 valid ("not -"): hold up to good_hold_s, then release radio
+    #   while SpO2 invalid ("-"/None) continuously for invalid_exit_s: disconnect
+    #   then prefer other brands for others_window_s before re-grabbing Mighty
+    mightysat_live_max_s: float = 25.0  # hard wall-clock cap (slightly > good_hold)
+    mightysat_good_hold_s: float = 20.0  # stream while values valid, max this long
+    mightysat_invalid_exit_s: float = 5.0  # continuous "-" / no valid SpO2 → drop link
+    mightysat_others_window_s: float = 5.0  # hunt NBP/NT/Omron before Mighty again
+    mightysat_no_data_grace_s: float = 8.0  # allow setup before counting no-data as "-"
+    mightysat_success_cooldown_s: float = 5.0  # min gap before re-connect after good dump
+    mightysat_fail_cooldown_s: float = 3.0
 
     # Radio / hunt / concurrency (dedicated Pi hub)
     # max_concurrent: simultaneous GATT sessions (Pi CYW43455: aim 4)
