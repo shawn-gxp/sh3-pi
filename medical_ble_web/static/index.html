@@ -239,15 +239,15 @@
 </head>
 <body>
   <header>
-    <h1>Medical BLE Web POC</h1>
-    <span class="badge">localhost only · SQLite · all toolkit brands</span>
+    <h1>Medical BLE Hub</h1>
+    <span class="badge">Pi hub · Tier-1 · SQLite · hub-only bond</span>
     <span class="badge" id="wsBadge">WS: connecting…</span>
   </header>
   <main>
     <section class="card">
-      <h2>Device</h2>
+      <h2>Pair device</h2>
       <div class="row">
-        <label>Brand / company
+        <label>Brand
           <select id="brand"></select>
         </label>
         <label>Model
@@ -256,29 +256,32 @@
         <label>MAC
           <input id="mac" placeholder="AA:BB:CC:DD:EE:FF" />
         </label>
-        <button id="btnSave" class="secondary" type="button">Save device</button>
       </div>
-      <p class="notes" id="brandNotes"></p>
-    </section>
-
-    <section class="card">
-      <h2>Actions</h2>
       <div class="row">
         <button id="btnScan" type="button">Scan</button>
         <button id="btnPair" type="button">Pair</button>
         <button id="btnRepair" class="secondary" type="button">Re-pair</button>
-        <button id="btnSync" type="button">Sync / Read</button>
-        <button id="btnLive" type="button">Live start</button>
-        <button id="btnStop" class="danger secondary" type="button">Live stop</button>
-        <button id="btnRefresh" class="secondary" type="button">Refresh data</button>
-        <button id="btnCycle" type="button" style="background: #3ecf8e; color: #000;">Auto-Cycle</button>
-        <button id="btnCycleStop" class="danger secondary" type="button">Stop Cycle</button>
-        <button id="btnHandsfree" type="button" style="background: #6c9eff; color: #000;">Nipro Hands-free</button>
-        <button id="btnHandsfreeStop" class="danger secondary" type="button">Stop Hands-free</button>
+        <button id="btnAutoSync" type="button" style="background: #3ecf8e; color: #000;">Auto-sync ON</button>
+        <button id="btnAutoSyncStop" class="danger secondary" type="button">Auto-sync OFF</button>
+        <button id="btnRefresh" class="secondary" type="button">Refresh</button>
       </div>
       <div id="actionStatus" class="notes">Ready.</div>
-      <p class="notes" id="niproHandsfreeMeta">Nipro post-measure (Omron-like): measure → display can go off → Sync within ~1–2 min (or Hands-free). NT-100B dumps on-device history; NBP waits for BP indicate; MightySat needs Live while on finger.</p>
+      <p class="notes" id="brandNotes"></p>
+      <p class="notes" id="autoSyncMeta"><strong>Hub auto-sync (concurrent):</strong> Pair once on this hub (no phone) → leave Auto-sync ON → measure. Up to <strong>4 simultaneous</strong> BLE links (Masimo stream + NBP/NT dumps together). Omron every <span id="omronPollLabel">5 min</span>. Status: <span id="autoSyncStatus">checking…</span></p>
     </section>
+
+    <!-- Hidden stubs so legacy JS does not throw (buttons removed from UI) -->
+    <div style="display:none" aria-hidden="true">
+      <button id="btnSave" type="button"></button>
+      <button id="btnSync" type="button"></button>
+      <button id="btnLive" type="button"></button>
+      <button id="btnStop" type="button"></button>
+      <button id="btnCycle" type="button"></button>
+      <button id="btnCycleStop" type="button"></button>
+      <button id="btnHandsfree" type="button"></button>
+      <button id="btnHandsfreeStop" type="button"></button>
+      <span id="niproHandsfreeMeta"></span>
+    </div>
 
     <!-- Multi-Device Auto-Cycle Dashboard -->
     <section class="card" id="dashboardCard">
@@ -292,7 +295,7 @@
       <div id="dashboardGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-top: 0.5rem; margin-bottom: 0.5rem;">
         <!-- Dashboard cards injected via JS -->
       </div>
-      <div class="panel-meta" id="cycleMeta">Start Auto-Cycle to poll all saved clinical devices sequentially.</div>
+      <div class="panel-meta" id="cycleMeta">Paired devices update automatically while Auto-sync is ON.</div>
     </section>
 
     <!-- Latest for selected device (sync history / last clinical) -->
@@ -305,19 +308,19 @@
       <div class="panel-meta" id="deviceLatestMeta">Select a device and Sync, or pick a saved device.</div>
     </section>
 
-    <!-- Live stream (only meaningful while active; layout follows brand) -->
+    <!-- Live stream (MightySat — auto-started by hub when sensor is on) -->
     <section class="card" id="liveCard">
       <div class="section-head">
         <h2>
           <span class="live-dot" id="liveDot"></span>
-          <span id="liveTitle">Live stream</span>
+          <span id="liveTitle">Live stream (MightySat)</span>
         </h2>
         <span class="count-pill" id="liveModeLabel">idle</span>
       </div>
       <div id="liveVitals" class="vitals-grid"></div>
-      <div class="panel-meta" id="liveMeta">Not streaming. Use Live start for continuous SpO2 (Masimo).</div>
+      <div class="panel-meta" id="liveMeta">Finger in sensor while Auto-sync is ON — hub starts stream.</div>
       <div class="panel-meta" id="liveClock">Last UI update: —</div>
-      <div class="hint" id="liveHint">Pick a brand — live layout adapts (SpO2 / BP / temp / glucose).</div>
+      <div class="hint" id="liveHint">SpO2 stream only while measuring; other devices appear under Readings.</div>
     </section>
 
     <section class="card">
@@ -824,8 +827,19 @@
         try {
           const data = await api("/live/latest");
           applyLiveSnapshot(data.live || {}, "poll");
+          // Also refresh board + readings so NT/NBP hub captures show up
+          const dash = await api("/cycle/status").catch(() => null);
+          if (dash && dash.dashboard) applyDashboard(dash.dashboard);
+          else {
+            const h = await api("/health").catch(() => null);
+            if (h) {
+              /* keep status fresh */
+            }
+          }
+          await refreshReadingsOnly().catch(() => {});
+          await refreshDaemonStatus().catch(() => {});
         } catch (_) {}
-      }, ms || 500);
+      }, ms || 2000);
     }
 
     function stopLivePolling() {
@@ -900,6 +914,7 @@
       if (cycleData && cycleData.dashboard) {
         applyDashboard(cycleData.dashboard);
       }
+      await refreshDaemonStatus();
     }
 
     function setFilter(mode) {
@@ -918,9 +933,49 @@
         "btnLive",
         "btnSave",
         "btnHandsfree",
+        "btnAutoSync",
       ].forEach((id) => {
         if ($(id)) $(id).disabled = !!on;
       });
+    }
+
+    function applyDaemonStatus(d) {
+      const el = $("autoSyncStatus");
+      if (!el || !d) return;
+      if (d.active) {
+        const extra = d.phase ? ` [${d.phase}]` : "";
+        const conc =
+          d.max_concurrent != null
+            ? ` · links ${d.concurrent_active || 0}/${d.max_concurrent}`
+            : "";
+        const omron =
+          d.config_omron_poll_s != null
+            ? ` · Omron ${Math.round(Number(d.config_omron_poll_s) / 60)}m`
+            : "";
+        el.textContent = (d.message || "ON — hunting…") + extra + conc + omron;
+        el.style.color = "#3ecf8e";
+      } else {
+        el.textContent = d.message || "OFF";
+        el.style.color = "";
+      }
+    }
+
+    async function refreshDaemonStatus() {
+      try {
+        const h = await api("/health");
+        if (h.hub && h.hub.omron_poll_interval_s != null && $("omronPollLabel")) {
+          const s = Number(h.hub.omron_poll_interval_s);
+          $("omronPollLabel").textContent =
+            s >= 60 ? `${Math.round(s / 60)} min` : `${s}s`;
+        }
+        if (h.daemon) applyDaemonStatus(h.daemon);
+        else {
+          const d = await api("/daemon/status");
+          applyDaemonStatus(d.daemon || d);
+        }
+      } catch (_) {
+        /* ignore */
+      }
     }
 
     $("brand").onchange = onBrandChange;
@@ -934,18 +989,22 @@
 
     $("btnScan").onclick = async () => {
       busy(true);
-      setStatus("Scanning…", "status-run");
+      setStatus("Scanning… (pauses hub briefly)", "status-run");
+      log("Scan: pausing hub, then BlueZ discover…");
       try {
         const data = await api("/scan", {
           method: "POST",
           body: JSON.stringify({ brand: null, timeout: 8 }),
         });
         renderScan(data.devices || []);
-        setStatus(`Scan done: ${data.count} device(s)`, "status-ok");
-        log(`Scan: ${data.count} device(s)`);
+        const n = data.count || 0;
+        setStatus(
+          n ? `Scan done: ${n} device(s) — click Use on a row` : (data.message || "Scan: 0 devices"),
+          n ? "status-ok" : "status-err"
+        );
+        log(`Scan: ${n} device(s)`);
       } catch (e) {
-        setStatus(String(e.message || e), "status-err");
-        log(String(e.message || e), "status-err");
+        showError(e);
       } finally {
         busy(false);
       }
@@ -976,7 +1035,9 @@
       }
       busy(true);
       setStatus(
-        repair ? "Re-pairing… accept Windows dialog" : "Pairing… accept Windows dialog",
+        repair
+          ? "Re-pairing… hub-only bond (BlueZ agent / accept if prompted)"
+          : "Pairing… hub-only bond (BlueZ agent / accept if prompted)",
         "status-run"
       );
       try {
@@ -1007,18 +1068,10 @@
         setStatus(`Pair OK · ${data.mac}`, "status-ok");
         log(`Pair OK ${data.mac} profile=${data.profile || ""}`);
         (data.next_steps || []).forEach((t) => log("  → " + t));
-        if (brandId === "omron") {
-          setStatus(
-            "Pair OK — try Sync now (no button). If FE4A error: short-press BT → Sync.",
-            "status-ok"
-          );
-        }
-        if (brandId.startsWith("nipro") || brandId === "masimo") {
-          setStatus(
-            "Pair OK — registered for Hands-free. Measure, then Sync or Hands-free wait.",
-            "status-ok"
-          );
-        }
+        setStatus(
+          "Pair OK — leave Auto-sync ON, then measure on the device",
+          "status-ok"
+        );
         await refreshAll();
       } catch (e) {
         showError(e);
@@ -1234,6 +1287,35 @@
         await refreshAll();
       } catch (e) {
         log(String(e.message || e), "status-err");
+      }
+    };
+
+    $("btnAutoSync").onclick = async () => {
+      busy(true);
+      setStatus("Starting hands-free Auto-sync…", "status-run");
+      try {
+        const data = await api("/daemon/start", { method: "POST", body: "{}" });
+        setStatus(data.message || "Auto-sync ON", "status-ok");
+        log(data.message || "Auto-sync ON");
+        applyDaemonStatus(data.daemon);
+      } catch (e) {
+        showError(e);
+      } finally {
+        busy(false);
+      }
+    };
+
+    $("btnAutoSyncStop").onclick = async () => {
+      busy(true);
+      try {
+        const data = await api("/daemon/stop", { method: "POST", body: "{}" });
+        setStatus(data.message || "Auto-sync OFF", "status-ok");
+        log("Auto-sync OFF");
+        applyDaemonStatus(data.daemon);
+      } catch (e) {
+        log(String(e.message || e), "status-err");
+      } finally {
+        busy(false);
       }
     };
 

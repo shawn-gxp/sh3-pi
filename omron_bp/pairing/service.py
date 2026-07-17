@@ -67,10 +67,10 @@ async def _os_bond_once(
                 return
             if is_pair_failed_error(exc):
                 raise OSError(
-                    "Windows pair() FAILED. Usually: (1) cuff not flashing P, "
-                    "(2) stale Windows bond, or (3) phone still owns the bond. "
-                    "Fix: remove cuff in Settings → Bluetooth, unpair phone "
-                    "OMRON Connect, hold BT until P, then RE-PAIR."
+                    "OS pair() FAILED. Usually: (1) cuff not flashing P, "
+                    "(2) stale OS bond, or (3) phone still owns the bond. "
+                    "Fix: remove cuff bond (Windows Settings or bluetoothctl remove), "
+                    "unpair phone OMRON Connect, hold BT until P, then RE-PAIR."
                 ) from exc
             raise
 
@@ -118,13 +118,13 @@ async def pair_device(
     # ---- Modern FE4A: OS bond only ----
     if profile.pairing_mode == PairingMode.OS_BONDING:
         if force_rebind:
-            logger.info("force_rebind: removing existing Windows bond first…")
+            logger.info("force_rebind: removing existing OS bond first…")
             await unpair_address(address)
 
         try:
             await _os_bond_once(address, profile, attempt_label="attempt 1")
         except Exception as first_exc:
-            # Auto recovery once: unpair + retry (stale bond is the #1 WinRT cause)
+            # Auto recovery once: unpair + retry (stale bond is a common cause)
             if force_rebind:
                 raise
             logger.warning(

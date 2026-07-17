@@ -6,15 +6,24 @@ Local-only proof-of-concept UI for the medical BLE toolkit.
 - **FastAPI** backend on `127.0.0.1:8741`
 - **SQLite** at `data/poc.db`
 - **All brands** from the interactive CLI catalog
+- **Windows (WinRT)** and **Linux (BlueZ)**
 
 ## Setup
 
 From the experiments root (so `bleak` and the toolkit are available):
 
 ```powershell
-cd "C:\Users\Shawn A\Desktop\Medical project\experiments"
+# Windows
 pip install -r requirements.txt
 pip install -r medical_ble_web\requirements.txt
+```
+
+```bash
+# Linux
+./setup_linux.sh
+# or:
+source .venv/bin/activate
+pip install -r requirements.txt -r medical_ble_web/requirements.txt
 ```
 
 ## Run
@@ -22,7 +31,14 @@ pip install -r medical_ble_web\requirements.txt
 From **experiments** root (easiest):
 
 ```powershell
+# Windows
 .\run_web.ps1
+```
+
+```bash
+# Linux
+./run_web.sh
+# PORT=9000 ./run_web.sh
 ```
 
 Or from this folder:
@@ -33,11 +49,9 @@ cd medical_ble_web
 # or: python app.py
 ```
 
-Options:
-
-```powershell
-.\run_web.ps1 -NoBrowser
-.\run_web.ps1 -Port 8741 -SkipInstall
+```bash
+cd medical_ble_web
+PYTHONPATH=.. ../.venv/bin/python app.py
 ```
 
 Opens: **http://127.0.0.1:8741**

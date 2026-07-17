@@ -19,7 +19,12 @@ from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 
 from ..common.hexutil import format_hex_dump, ms_timestamp
-from ..common.winrt_errors import is_windows
+from ..common.winrt_errors import (
+    is_windows,
+    os_pair_supported,
+    pairing_ui_hint,
+    remove_bond_instructions,
+)
 from ..parser import get_parser
 from ..parsers.blood_pressure import (
     BlpBloodPressureParser,
@@ -130,7 +135,8 @@ class BeurerCompanionSession:
             }
         )
 
-        self.pair = pair and is_windows()
+        # OS bonding needed on Windows and Linux for encrypted BLP indications
+        self.pair = bool(pair) and os_pair_supported()
         self.duration = duration if duration is not None else self.timing.max_listen_s
         self.connect_timeout = connect_timeout
         self.connect_retries = max(1, connect_retries)
@@ -189,9 +195,9 @@ class BeurerCompanionSession:
         )
         if self.passkey_hint:
             log.info(
-                "[PAIR] Passkey likely for %s — accept Windows dialog / enter "
-                "6-digit code from device LCD if shown.",
+                "[PAIR] Passkey likely for %s — %s",
                 self.model_id,
+                pairing_ui_hint(),
             )
 
     # ----- notify ----------------------------------------------------------
@@ -639,8 +645,8 @@ class BeurerCompanionSession:
         log.info("[SYNC] %s", result.summary())
         if result.status == SyncStatus.PAIRING_REQUIRED and self.passkey_hint:
             log.info(
-                "[SYNC] Tip: remove stale bond in Windows Bluetooth settings, "
-                "re-run, enter 6-digit passkey from cuff LCD."
+                "[SYNC] Tip: %s Then re-run and enter 6-digit passkey from cuff LCD.",
+                remove_bond_instructions(),
             )
         return result
 

@@ -1,16 +1,44 @@
-# Experiments — Omron BLE (HEM-7143T1)
+# Experiments — Medical BLE (multi-brand) + Omron HEM-7143T1
 
-Tools for **finding, pairing, and reading** the Omron automatic BP monitor  
-**HEM-7143T1** over **Bluetooth Low Energy (BLE)** on Windows.
+Tools for **finding, pairing, and reading** smart medical devices over
+**Bluetooth Low Energy (BLE)** on **Windows (WinRT)** and **Linux (BlueZ)**.
 
-## Recommended path (new app): **omron_bp**
+| Platform | Docs | Launch |
+|----------|------|--------|
+| **Linux** | [LINUX.md](LINUX.md) | `./setup_linux.sh` → `./run_web.sh` / `./run_toolkit.sh` |
+| **Windows** | below + `*.ps1` | `.\run_web.ps1` / `python -m medical_ble_toolkit` |
 
-Structured multi-model CLI we maintain: `experiments/omron_bp/`
+**Multi-brand toolkit:** `medical_ble_toolkit/` (Omron, Beurer, Nipro, A&D, Masimo, …)  
+**Web UI:** `medical_ble_web/` → http://127.0.0.1:8741  
+**Omron package:** `omron_bp/`
+
+## Linux (quick start)
+
+```bash
+./setup_linux.sh
+./run_web.sh          # browser: http://127.0.0.1:8741
+# or CLI:
+./run_toolkit.sh
+./run_toolkit.sh omron pair -d HEM-7143T1 -a E1:99:7D:27:1C:0A
+```
+
+See **[LINUX.md](LINUX.md)** for BlueZ pairing, `bluetoothctl`, and troubleshooting.
+
+## Recommended path (Omron package): **omron_bp**
+
+Structured multi-model CLI we maintain: `omron_bp/`
 
 ```powershell
-cd experiments
+# Windows
 python -m pip install -r omron_bp\requirements.txt
 python -m omron_bp              # menu: pair | read
+python -m omron_bp pair -d HEM-7143T1 -m E1:99:7D:27:1C:0A
+python -m omron_bp read -d HEM-7143T1 -m E1:99:7D:27:1C:0A
+```
+
+```bash
+# Linux
+source .venv/bin/activate
 python -m omron_bp pair -d HEM-7143T1 -m E1:99:7D:27:1C:0A
 python -m omron_bp read -d HEM-7143T1 -m E1:99:7D:27:1C:0A
 ```

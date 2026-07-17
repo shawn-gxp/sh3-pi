@@ -19,16 +19,6 @@
       "address": "C0:26:DA:1B:11:46",
       "user_no": "",
       "color_code": "0"
-    },
-    {
-      "id_nodash": "c951e9bbe222",
-      "name": "MightySat",
-      "serial": "",
-      "category": "spo2",
-      "profile_id": "mightysat",
-      "address": "C9:51:E9:BB:E2:22",
-      "user_no": "",
-      "color_code": "0"
     }
   ]
 }

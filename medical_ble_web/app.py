@@ -36,9 +36,12 @@ from ble_jobs import (  # noqa: E402
     BleJobError,
     build_dashboard,
     cycle_status,
+    daemon_status,
     handsfree_status,
     job_cycle_start,
     job_cycle_stop,
+    job_daemon_start,
+    job_daemon_stop,
     job_live_start,
     job_live_stop,
     job_nipro_handsfree_start,
@@ -72,10 +75,24 @@ if STATIC.is_dir():
 
 
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     db.init_db()
     log.info("SQLite ready: %s", db.DB_PATH)
     log.info("Open http://127.0.0.1:8741")
+    # Hands-free: if any device is already paired, start auto-sync
+    try:
+        devices = db.list_devices()
+        paired = [d for d in devices if d.get("paired")]
+        if paired:
+            await job_daemon_start()
+            log.info(
+                "Auto-sync started for %d paired device(s)",
+                len(paired),
+            )
+        else:
+            log.info("No paired devices yet — auto-sync idle until Pair")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not auto-start auto-sync: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -156,24 +173,79 @@ async def index() -> FileResponse:
 
 @app.get("/health")
 async def health() -> Dict[str, Any]:
+    try:
+        from medical_ble_toolkit.hub.config import load_hub_config, default_config_path
+
+        cfg = load_hub_config()
+        hub_cfg = {
+            "omron_poll_interval_s": cfg.omron_poll_interval_s,
+            "path": str(default_config_path()),
+            "mqtt_enabled": cfg.mqtt_enabled,
+        }
+    except Exception as exc:  # noqa: BLE001
+        hub_cfg = {"error": str(exc)}
     return {
         "ok": True,
         "service": "medical_ble_web",
+        "mode": "tier1_hub",
         "db": str(db.DB_PATH),
+        "daemon": daemon_status(),
         "live": live_status(),
+        "hub": hub_cfg,
+    }
+
+
+@app.post("/admin/reset")
+async def admin_reset() -> Dict[str, Any]:
+    """Wipe devices/readings/sessions (fresh hub pairing). Does not touch OS bonds."""
+    try:
+        if daemon_status().get("active"):
+            await job_daemon_stop()
+        if live_status().get("active"):
+            await job_live_stop()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("stop before reset: %s", exc)
+    db.reset_db()
+    # Clear Nipro exact-name registry next to web app
+    reg = ROOT / "nipro_paired_devices.json"
+    try:
+        reg.write_text('{"meters": []}\n', encoding="utf-8")
+    except OSError as exc:
+        log.warning("registry clear: %s", exc)
+    return {
+        "ok": True,
+        "message": "DB + nipro registry cleared. Re-pair devices on this hub only.",
+        "db": str(db.DB_PATH),
     }
 
 
 @app.get("/brands")
-async def brands() -> Dict[str, Any]:
-    return {"brands": list_brands()}
+async def brands(
+    all: bool = Query(False, description="Include advanced/non Tier-1 brands"),
+) -> Dict[str, Any]:
+    """Default: Tier-1 hub brands only (Omron, NBP, NT-100B, MightySat)."""
+    return {
+        "brands": list_brands(include_advanced=bool(all)),
+        "tier1_only": not bool(all),
+    }
 
 
 @app.post("/scan")
 async def scan(body: ScanBody) -> Dict[str, Any]:
     try:
         devices = await job_scan(brand_id=body.brand, timeout=body.timeout)
-        return {"ok": True, "count": len(devices), "devices": devices}
+        return {
+            "ok": True,
+            "count": len(devices),
+            "devices": devices,
+            "message": (
+                f"Found {len(devices)} device(s)"
+                if devices
+                else "No devices — wake meters / move closer / try again"
+            ),
+        }
+    except BleJobError as exc:
+        raise HTTPException(status_code=409, detail=exc.as_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         log.exception("scan failed")
         raise HTTPException(500, str(exc)) from exc
@@ -355,6 +427,26 @@ async def cycle_start(body: CycleBody) -> Dict[str, Any]:
 @app.post("/cycle/stop")
 async def cycle_stop() -> Dict[str, Any]:
     return await job_cycle_stop()
+
+
+@app.get("/daemon/status")
+async def daemon_status_route() -> Dict[str, Any]:
+    """Background auto-sync daemon status (started after Pair if enabled)."""
+    return {"ok": True, "daemon": daemon_status()}
+
+
+@app.post("/daemon/start")
+async def daemon_start() -> Dict[str, Any]:
+    try:
+        return await job_daemon_start()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("daemon start failed")
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/daemon/stop")
+async def daemon_stop() -> Dict[str, Any]:
+    return await job_daemon_stop()
 
 
 @app.websocket("/ws/live")

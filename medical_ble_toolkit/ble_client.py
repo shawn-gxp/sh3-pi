@@ -49,9 +49,14 @@ from bleak.exc import BleakError, BleakDeviceNotFoundError
 from .common.gatt_map import format_gatt_tree
 from .common.hexutil import format_hex_dump, ms_timestamp
 from .common.winrt_errors import (
+    ble_log_tag,
     classify_ble_error,
     format_diagnosis,
+    is_linux,
     is_windows,
+    os_pair_supported,
+    pairing_ui_hint,
+    remove_bond_instructions,
 )
 from .models import ParseError, RawPayload
 from .parser import get_parser, parse as parse_payload
@@ -124,6 +129,12 @@ def _is_scanner_busy(exc: BaseException) -> bool:
             "aborted",
             "bluetooth turned on",
             "radio",
+            "not ready",
+            "in progress",
+            "org.bluez.error.inprogress",
+            "org.bluez.error.notready",
+            "resource busy",
+            "no default bluetooth adapter",
         )
     )
 
@@ -165,10 +176,18 @@ async def scan_devices(
         platform.system(),
         retries,
     )
+    tag = ble_log_tag()
     if is_windows():
         log.info(
-            "[WINRT] Using Windows Bluetooth stack. Ensure Bluetooth is ON "
-            "in Quick Settings and no other app holds exclusive access."
+            "[%s] Using Windows Bluetooth stack. Ensure Bluetooth is ON "
+            "in Quick Settings and no other app holds exclusive access.",
+            tag,
+        )
+    elif is_linux():
+        log.info(
+            "[%s] Using BlueZ. Adapter must be powered "
+            "(bluetoothctl power on). Close other scanners if scan fails.",
+            tag,
         )
 
     devices: Any = None
@@ -210,16 +229,15 @@ async def scan_devices(
     if devices is None:
         log.error(
             "Scan failed after %d attempt(s) — adapter off / permissions / "
-            "WinRT scanner busy (ABORTED).",
+            "scanner busy.",
             attempts,
         )
         if last_exc is not None:
             _log_winrt(last_exc, operation="scan")
-        if is_windows():
-            log.error(
-                "[WINRT] Connect still works without scan: pass the MAC address "
-                "(toolkit uses BLEDevice → FromBluetoothAddressAsync)."
-            )
+        log.error(
+            "[%s] Connect still works without scan: pass the MAC address directly.",
+            ble_log_tag(),
+        )
         return []
 
     results: List[BLEDevice] = []
@@ -295,7 +313,7 @@ class MedicalBleClient:
         self.profile = profile
         self.on_reading = on_reading
         self.auto_dispatch = auto_dispatch
-        # Windows: call client.pair() after connect (shows OS pairing dialog)
+        # OS bond after connect (WinRT dialog / BlueZ agent) when True
         self.pair = pair
         self.connect_retries = max(1, connect_retries)
         # Omron-like: hunt device after measure while Nipro still advertises
@@ -550,15 +568,14 @@ class MedicalBleClient:
                 "%.0fs after measure (Nipro BLE window). Keep meter nearby.",
                 find_budget,
             )
-        if is_windows():
-            log.info(
-                "[WINRT] bleak → Windows Runtime Bluetooth APIs. "
-                "If a pairing popup appears, ACCEPT it — dismissing it raises BleakError."
-            )
-            log.info(
-                "[WINRT] Tip: Settings → Bluetooth & devices — remove stale entries "
-                "for this address if connect loops fail."
-            )
+        tag = ble_log_tag()
+        if self.pair:
+            log.info("[%s] %s", tag, pairing_ui_hint())
+        log.info(
+            "[%s] If connect loops fail: %s",
+            tag,
+            remove_bond_instructions(self.address),
+        )
 
         last_exc: Optional[BaseException] = None
         attempt = 0
@@ -652,34 +669,40 @@ class MedicalBleClient:
         log.debug("[POST-MEASURE] not advertising yet (scanned %d)", len(devices))
         return False
 
-    def _ble_device(self) -> BLEDevice:
+    def _connect_target(self) -> Any:
         """
-        Wrap MAC as BLEDevice so WinRT uses FromBluetoothAddressAsync.
+        Platform-correct BleakClient target.
 
-        BleakClient("AA:BB:…") always starts BluetoothLEAdvertisementWatcher
-        first; when the watcher is ABORTED that fails even though the cuff is
-        reachable. Omron pair/read already use this path — multi-brand must too.
+        Windows: BLEDevice(mac) → FromBluetoothAddressAsync (no scanner).
+                 BleakClient("AA:BB:…") always starts the advertisement watcher.
+
+        Linux BlueZ: plain MAC string. Fake BLEDevice(..., details=None) crashes:
+                 TypeError: 'NoneType' object is not subscriptable
+                 (backend does details["path"]).
         """
-        return BLEDevice(self.address.strip().upper(), self.profile.model or "device", None)
+        mac = self.address.strip().upper()
+        if is_windows():
+            return BLEDevice(mac, self.profile.model or "device", None)
+        return mac
 
     async def _connect_once(self, timeout: float) -> None:
         """
-        Single connect attempt with explicit WinRT exception branches.
+        Single connect attempt with platform-aware exception handling.
 
-        Exception matrix (Windows):
+        Exception matrix:
           asyncio.TimeoutError     — connect() exceeded timeout (dialog slow / not adv)
           BleakDeviceNotFoundError — address not in radio range / wrong MAC
           BleakError               — dialog dismissed, unreachable, access denied, …
           OSError                  — adapter/stack issues
           Exception                — unexpected; log full traceback for RE
         """
-        # Always prefer BLEDevice target — skips WinRT scan on connect.
-        target: Any = self._ble_device() if is_windows() else self.address
-        if is_windows():
-            log.info(
-                "[WINRT] Connecting via BLEDevice(%s) — no advertisement scan",
-                self.address,
-            )
+        target: Any = self._connect_target()
+        log.info(
+            "[%s] Connecting via %s(%s)",
+            ble_log_tag(),
+            "BLEDevice" if is_windows() else "MAC string",
+            self.address,
+        )
 
         self._client = BleakClient(
             target,
@@ -687,37 +710,31 @@ class MedicalBleClient:
             disconnected_callback=self._on_disconnect,
         )
 
-        # ---- 1) TCP/BLE link connect --------------------------------------
+        # ---- 1) BLE link connect ------------------------------------------
         try:
             await self._client.connect()
         except asyncio.TimeoutError as exc:
-            # WinRT: FromBluetoothAddressAsync / connect can hang until timeout
-            # when the device stopped advertising or pairing UI is waiting.
             log.error(
                 "[CONNECT] TIMEOUT after %.0fs — device not advertising, out of "
-                "range, or Windows pairing dialog left unanswered.",
+                "range, or pairing prompt left unanswered.",
                 timeout,
             )
             _log_winrt(exc, operation="connect/timeout")
-            log.error(
-                "[WINRT] If a pairing popup was open: accept it next time, or "
-                "dismiss then re-run with a longer --connect-timeout."
-            )
+            log.error("[%s] %s", ble_log_tag(), pairing_ui_hint())
             raise
         except BleakDeviceNotFoundError as exc:
             log.error("[CONNECT] Device not found: %s", self.address)
             _log_winrt(exc, operation="connect/not_found")
             raise
         except BleakError as exc:
-            # Most common path for "user cancelled pairing", Unreachable, etc.
             log.error("[CONNECT] BleakError: %s", exc)
             _log_winrt(exc, operation="connect")
-            # Explicit callout when the OS dialog was dismissed
             diag = classify_ble_error(exc)
             if diag.category == "PAIRING_DIALOG_DISMISSED":
                 log.error(
-                    "[WINRT] ★ Pairing dialog was dismissed. Re-run, watch the "
-                    "taskbar for the Bluetooth popup, and click Connect/Yes."
+                    "[%s] ★ Pairing was dismissed/rejected. Re-run and accept the prompt. %s",
+                    ble_log_tag(),
+                    pairing_ui_hint(),
                 )
             raise
         except OSError as exc:
@@ -735,7 +752,7 @@ class MedicalBleClient:
             raise
 
         if not self._client.is_connected:
-            # Defensive: some WinRT builds return without raising
+            # Defensive: some backends return without raising
             exc = BleakError(
                 f"connect() returned but is_connected=False for {self.address}"
             )
@@ -745,33 +762,31 @@ class MedicalBleClient:
         log.info("[CONNECT] link up  is_connected=%s", self._client.is_connected)
 
         # ---- 2) Optional OS-level pairing / bonding -----------------------
-        # Windows shows a system dialog; dismissing it → BleakError.
+        # Windows: system dialog; Linux BlueZ: agent / Just-Works.
         if self.pair:
-            await self._pair_winrt()
+            await self._pair_os()
 
         # ---- 3) GATT discovery map (forensic) -----------------------------
         await self._print_gatt_map()
 
-    async def _pair_winrt(self) -> None:
+    async def _pair_os(self) -> None:
         """
-        Call BleakClient.pair() with WinRT-specific guards.
+        Call BleakClient.pair() with platform-aware guards.
 
-        protection_level=2 ≈ encryption + authentication (Windows).
-        If the user dismisses the OS dialog, bleak raises BleakError — we
+        Windows: protection_level=2 ≈ encryption + authentication.
+        Linux BlueZ: plain pair() / Just-Works; passkey via desktop agent.
+
+        If the user dismisses the OS dialog/agent, bleak raises BleakError — we
         catch it, log remediation, and re-raise so the session aborts cleanly
         rather than continuing half-bonded.
-
-        Common WinRT race (seen on MightySat): connect succeeds, then pair()
-        tears down the GATT session and bleak hits
-        AttributeError: 'NoneType' object has no attribute 'device_information'.
-        That is retryable — the next connect often reports already paired.
         """
         if not self._client:
             return
         if not hasattr(self._client, "pair"):
             log.warning(
                 "[PAIR] BleakClient.pair() not available on this backend — "
-                "pair manually in Windows Settings → Bluetooth & devices."
+                "pair manually via OS Bluetooth settings. %s",
+                remove_bond_instructions(self.address),
             )
             return
 
@@ -783,27 +798,41 @@ class MedicalBleClient:
         except Exception:  # noqa: BLE001
             pass
 
-        log.info(
-            "[PAIR] Requesting OS pairing (Windows may show a popup — ACCEPT it)…"
-        )
-        log.info(
-            "[PAIR] If you dismiss/cancel the dialog, expect BleakError "
-            "PAIRING_DIALOG_DISMISSED and a failed session."
+        log.info("[PAIR] Requesting OS pairing… %s", pairing_ui_hint())
+        # Nipro NBP / A&D / Beurer: companion often still dumps after connect even if
+        # OS Just-Works pair() returns AuthenticationFailed (stale bond / agent).
+        # Omron FE4A needs a real bond — keep hard-fail there.
+        soft_ok_ids = (
+            "nipro_nbp",
+            "nipro_nmbp",
+            "nipro_nsm1",
+            "nipro_cf",
+            "and_ua651",
+            "beurer_bp",
+            "beurer_bm54",
+            "beurer_glucose",
         )
         try:
-            # protection_level is honored on Windows; ignored or rejected elsewhere
-            try:
-                await self._client.pair(protection_level=2)
-            except TypeError:
-                # Older bleak: pair() takes no kwargs
-                await self._client.pair()
+            if is_linux():
+                # BlueZ needs a pair agent or AuthenticationFailed/Canceled
+                from omron_bp.ble.connection import pair_client as _omron_pair
+
+                await _omron_pair(self._client)
+            else:
+                # protection_level is honored on Windows
+                try:
+                    await self._client.pair(protection_level=2)
+                except TypeError:
+                    await self._client.pair()
             log.info("[PAIR] pair() completed OK")
         except asyncio.TimeoutError as exc:
             log.error(
-                "[PAIR] TIMEOUT — pairing dialog not confirmed in time, or "
+                "[PAIR] TIMEOUT — pairing prompt not confirmed in time, or "
                 "device left pairing mode."
             )
             _log_winrt(exc, operation="pair/timeout")
+            if self._soft_pair_continue(soft_ok_ids, exc):
+                return
             raise
         except BleakError as exc:
             diag = classify_ble_error(exc)
@@ -811,26 +840,30 @@ class MedicalBleClient:
             _log_winrt(exc, operation="pair")
             if diag.category == "PAIRING_DIALOG_DISMISSED":
                 log.error(
-                    "[WINRT] ★ You (or a timeout) dismissed the Windows pairing "
-                    "dialog. Re-run with --pair and accept the popup."
+                    "[%s] ★ Pairing dismissed/rejected. Re-run with --pair. %s",
+                    ble_log_tag(),
+                    pairing_ui_hint(),
                 )
-            # Some stacks raise if already paired — treat as soft success
             msg = str(exc).lower()
             if "already" in msg and "pair" in msg:
                 log.warning("[PAIR] Already paired — continuing.")
                 return
+            if self._soft_pair_continue(soft_ok_ids, exc):
+                return
             raise
         except AttributeError as exc:
-            # WinRT: session closed during pair → _bleak_backend fields are None
+            # WinRT race: session closed mid-pair
             msg = str(exc)
             if "device_information" in msg or not getattr(
                 self._client, "is_connected", False
             ):
                 log.warning(
-                    "[PAIR] Link dropped mid-pair (WinRT race: %s). "
+                    "[PAIR] Link dropped mid-pair (%s). "
                     "Often the bond still completed — retry will skip if already paired.",
                     msg,
                 )
+                if self._soft_pair_continue(soft_ok_ids, exc):
+                    return
                 raise BleakError(
                     "Pair interrupted: GATT session closed mid-pair (retryable)"
                 ) from exc
@@ -840,7 +873,26 @@ class MedicalBleClient:
         except Exception as exc:  # noqa: BLE001
             log.error("[PAIR] Unexpected %s: %s", type(exc).__name__, exc)
             _log_winrt(exc, operation="pair/unexpected")
+            if self._soft_pair_continue(soft_ok_ids, exc):
+                return
             raise
+
+    def _soft_pair_continue(self, soft_ok_ids: tuple, exc: BaseException) -> bool:
+        """True = keep session (Nipro/A&D/Beurer companion-style)."""
+        pid = getattr(self.profile, "id", "") or ""
+        if pid not in soft_ok_ids:
+            return False
+        if not self._client or not getattr(self._client, "is_connected", False):
+            return False
+        log.warning(
+            "[PAIR] OS pair failed (%s) but link still up for profile=%s — "
+            "continuing (companion clock+indicate may work without perfect bond). "
+            "If Sync gets no data: %s",
+            type(exc).__name__,
+            pid,
+            remove_bond_instructions(self.address),
+        )
+        return True
 
     def _iter_gatt_chars(self) -> List[tuple[Any, Any]]:
         """List of (service, characteristic) from the live client."""
@@ -1027,11 +1079,11 @@ class MedicalBleClient:
             getattr(client, "is_connected", "?"),
             ms_timestamp(),
         )
-        if is_windows():
-            log.warning(
-                "[WINRT] Unexpected disconnect: check device sleep, range, or "
-                "pairing. Re-advertise and re-run if mid-session."
-            )
+        log.warning(
+            "[%s] Unexpected disconnect: check device sleep, range, or pairing. "
+            "Re-advertise and re-run if mid-session.",
+            ble_log_tag(),
+        )
 
     async def subscribe(self) -> None:
         if not self._client or not self._client.is_connected:
@@ -1179,10 +1231,11 @@ class MedicalBleClient:
                 pid,
                 nipro_mod.POST_CONNECT_CLOCK_DELAY_S,
             )
-            if pid == "nipro_nmbp" and is_windows() and not self.pair:
+            if pid == "nipro_nmbp" and os_pair_supported() and not self.pair:
                 log.warning(
-                    "[WINRT] NMBP usually needs OS bonding — re-run with --pair "
-                    "if serial/indications fail."
+                    "[%s] NMBP usually needs OS bonding — re-run with --pair "
+                    "if serial/indications fail.",
+                    ble_log_tag(),
                 )
             await asyncio.sleep(nipro_mod.POST_CONNECT_CLOCK_DELAY_S)
             try:
@@ -1279,40 +1332,69 @@ class MedicalBleClient:
                         except (TypeError, ValueError):
                             count = 1
                         break
-                # Omron-like: dump all on-device history (up to NT100B_HISTORY_MAX)
-                max_hist = min(count, pm.NT100B_HISTORY_MAX)
-                log.info(
-                    "[POST-MEASURE] NT-100B TICD bulk dump: %d slot(s) "
-                    "(device count=%s) — like Omron history read",
-                    max_hist,
-                    count,
-                )
-                for index in range(max_hist):
+
+                async def _pull_slot(index: int) -> None:
                     if not self._client or not self._client.is_connected:
-                        log.warning(
-                            "NT-100B disconnected mid-history at index %d", index
-                        )
-                        break
+                        return
                     if hasattr(self._parser, "set_history_index"):
                         self._parser.set_history_index(index)  # type: ignore[attr-defined]
                     await _tw(
                         thermo_mod.cmd_read_storage_time(index),
                         f"nt100b_time[{index}]",
                     )
-                    await asyncio.sleep(0.28)
+                    await asyncio.sleep(0.30)
                     await _tw(
                         thermo_mod.cmd_read_storage_result(index),
                         f"nt100b_result[{index}]",
                     )
-                    await asyncio.sleep(0.28)
+                    await asyncio.sleep(0.30)
+
+                # Index 0 = latest on device (TICD). Pull FIRST so the hub
+                # always gets the newest measure even if we later dump history.
+                log.info(
+                    "[POST-MEASURE] NT-100B TICD pull index 0 (latest) first "
+                    "(device count=%s)",
+                    count,
+                )
+                await _pull_slot(0)
+                n_latest = sum(
+                    1
+                    for r in self.readings
+                    if getattr(r, "object_temperature", None) is not None
+                )
+                log.info(
+                    "[POST-MEASURE] NT-100B latest slot done — %d temp reading(s) so far",
+                    n_latest,
+                )
+
+                # Optional older history only if NT100B_HISTORY_MAX > 1
+                max_hist = min(count, pm.NT100B_HISTORY_MAX)
+                if max_hist > 1:
+                    log.info(
+                        "[POST-MEASURE] NT-100B TICD history dump slots 1..%d",
+                        max_hist - 1,
+                    )
+                    for index in range(1, max_hist):
+                        if not self._client or not self._client.is_connected:
+                            log.warning(
+                                "NT-100B disconnected mid-history at index %d", index
+                            )
+                            break
+                        await _pull_slot(index)
+                else:
+                    log.info(
+                        "[POST-MEASURE] NT-100B latest-only mode "
+                        "(NT100B_HISTORY_MAX=%s) — frees radio for MightySat",
+                        pm.NT100B_HISTORY_MAX,
+                    )
+
                 n_temp = sum(
                     1
                     for r in self.readings
                     if getattr(r, "object_temperature", None) is not None
                 )
                 log.info(
-                    "[POST-MEASURE] NT-100B dump done — %d temperature(s) "
-                    "(display may already be off; data was on-device)",
+                    "[POST-MEASURE] NT-100B dump done — %d temperature(s) total",
                     n_temp,
                 )
             except BleakError as exc:
@@ -1524,10 +1606,11 @@ class MedicalBleClient:
                 "UA-651BLE (Nipro): buffer=30 + Date Time + Set Time + 0xE1 "
                 "within 5s gate (CCCD Indicate already on)…"
             )
-            if is_windows() and not self.pair:
+            if os_pair_supported() and not self.pair:
                 log.warning(
-                    "[WINRT] UA-651BLE usually needs OS bonding — re-run with --pair "
-                    "if indications never arrive."
+                    "[%s] UA-651BLE usually needs OS bonding — re-run with --pair "
+                    "if indications never arrive.",
+                    ble_log_tag(),
                 )
             custom_uuid = self.profile.write_uuid or and_mod.AND_CUSTOM_CHAR_UUID
             # 0xA6 mode 1 = 30-record buffer (SDK); mode 0 = no buffer (only latest)
@@ -1592,10 +1675,11 @@ class MedicalBleClient:
                 "Beurer BP: CCCD Indicate already on — device auto-dumps stored "
                 "measurements (no download command; APK BloodPressureDeviceSyncRepoImpl)."
             )
-            if is_windows() and not self.pair:
+            if os_pair_supported() and not self.pair:
                 log.info(
-                    "[WINRT] Newer BM54 uses 6-digit passkey — if connect fails, "
-                    "retry with --pair and enter the code from the cuff LCD."
+                    "[%s] Newer BM54 uses 6-digit passkey — if connect fails, "
+                    "retry with --pair and enter the code from the cuff LCD.",
+                    ble_log_tag(),
                 )
             # Optional DIS reads (app path) — best-effort, non-fatal
             await self._read_device_information()
@@ -1648,12 +1732,13 @@ class MedicalBleClient:
         if quiet_timeout is None and self.profile.id == "nipro_nsm1":
             quiet_timeout = 6.0
         if quiet_timeout is None and self.profile.id == "nipro_nt100b":
-            # If TICD already returned a temp, end soon; else wait for HTP/TICD
+            # After TICD latest pull we already have temps — short quiet is OK.
+            # Keep a little room for a late HTP indication if it still arrives.
             has_temp = any(
                 getattr(r, "object_temperature", None) is not None
                 for r in self.readings
             )
-            quiet_timeout = 2.5 if has_temp else 12.0
+            quiet_timeout = 4.0 if has_temp else 15.0
         # Nipro CF: history may stream then go quiet
         if quiet_timeout is None and self.profile.id == "nipro_cf":
             quiet_timeout = 10.0
@@ -1843,15 +1928,8 @@ class MedicalBleClient:
             from .nipro import post_measure as pm
 
             pid = self.profile.id
-            if self.find_timeout <= 0 and (
-                pid.startswith("nipro_") or pid in ("mightysat", "thermometer")
-            ):
-                self.find_timeout = pm.find_window_for(pid)
-                log.info(
-                    "[POST-MEASURE] auto find_window=%.0fs for %s",
-                    self.find_timeout,
-                    pid,
-                )
+            # find_timeout is caller-controlled (hub sets short/zero after AD;
+            # manual Sync may pass a positive window). Do not override here.
             if quiet_timeout is None:
                 q = pm.quiet_s_for(pid)
                 if q is not None:
@@ -1859,14 +1937,26 @@ class MedicalBleClient:
             # Prefer longer receive when caller left default 60
             if duration <= 60.0 and pid.startswith("nipro_"):
                 duration = max(duration, pm.receive_s_for(pid))
+            # Do NOT auto-force a long find_window when caller left find_timeout=0
+            # (hub already saw the AD — long hunt eats the BLE window).
+            # Auto-hunt only when find_timeout was left at default and caller
+            # set a positive value via constructor / web.
         except Exception:  # noqa: BLE001
             pass
 
         err: Optional[BaseException] = None
         try:
             await self.connect(timeout=connect_timeout)
-            await self.subscribe()
-            await self.run_post_connect_setup()
+            # げんきノート NBP/NMBP: settle+clock BEFORE StartUpdates on 0x2A35.
+            # (NT-100B / streams keep subscribe-first.)
+            clock_before_cccd = self.profile.id in ("nipro_nbp", "nipro_nmbp")
+            if clock_before_cccd:
+                await self.run_post_connect_setup()
+                await asyncio.sleep(0.15)
+                await self.subscribe()
+            else:
+                await self.subscribe()
+                await self.run_post_connect_setup()
             # 0.0 means disable quiet-end (continuous stream)
             qt = None if quiet_timeout == 0.0 else quiet_timeout
             await self.listen(duration=duration, quiet_timeout=qt)
@@ -1970,11 +2060,7 @@ async def _async_connect_main(args: argparse.Namespace) -> int:
                 log.error(
                     "No devices found. Is Bluetooth on? Is the meter advertising?"
                 )
-                if is_windows():
-                    log.error(
-                        "[WINRT] Quick Settings → Bluetooth ON; then wake the device "
-                        "and re-scan within its advertising window."
-                    )
+                log.error("[%s] Wake the device and re-scan within its advertising window.", ble_log_tag())
                 return 1
             if profile and devices:
                 args.address = devices[0].address
@@ -1995,11 +2081,13 @@ async def _async_connect_main(args: argparse.Namespace) -> int:
             "hem7143t1",
             "omron",
             "nipro_nmbp",
-        ) and is_windows()
+            "beurer_bp",
+        ) and os_pair_supported()
         if pair:
             log.info(
-                "[WINRT] Auto-enabling --pair for profile %s on Windows "
+                "[%s] Auto-enabling --pair for profile %s "
                 "(pass --no-pair to skip OS bonding).",
+                ble_log_tag(),
                 profile.id,
             )
 
@@ -2122,11 +2210,11 @@ async def _async_main(args: argparse.Namespace) -> int:
         platform.platform(),
         sys.version.split()[0],
     )
-    if is_windows():
-        log.info(
-            "[WINRT] Windows detected — pairing dialogs, Unreachable, and "
-            "dialog-dismiss errors will be classified under [WINRT] log tags."
-        )
+    log.info(
+        "[%s] Stack diagnostics use [%s] tags (Windows WinRT / Linux BlueZ).",
+        ble_log_tag(),
+        ble_log_tag(),
+    )
 
     if getattr(args, "command", None) == "omron":
         return await _async_omron_main(args)
@@ -2141,7 +2229,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Medical BLE reverse-engineering toolkit (multi-brand). "
             "Brands: Beurer/A&D (BLP), Omron (EEPROM via omron_bp), "
             "MightySat, thermometer, FORA scaffold. "
-            "Windows 11: [WINRT] diagnostics for pairing dialog failures."
+            "Windows (WinRT) and Linux (BlueZ) supported."
         ),
     )
     p.add_argument("-v", "--verbose", action="store_true", default=True)
@@ -2408,7 +2496,8 @@ async def _async_nipro_main(args: argparse.Namespace) -> int:
                 client = MedicalBleClient(
                     profile=prof,
                     address=address,
-                    pair=is_windows() and profile_id in ("nipro_nmbp", "and_ua651"),
+                    pair=os_pair_supported()
+                    and profile_id in ("nipro_nmbp", "and_ua651"),
                 )
                 await client.connect(timeout=30.0)
                 await client._read_device_information()

@@ -142,8 +142,9 @@ async def read_omron(
         ms_timestamp(),
     )
     log.info(
-        "[OMRON] Short-press Bluetooth for transfer mode (not P). "
-        "Watch omron_bp logs for TX/RX hex if verbose."
+        "[OMRON] Direct MAC read (no scan). Bonded cuff is often connectable for "
+        "hours after last use — no button required when the radio is still up. "
+        "If connect fails: wake cuff once (short-press BT), then retry."
     )
 
     all_users_dicts = await read_device_records(

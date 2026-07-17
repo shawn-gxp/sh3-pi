@@ -26,7 +26,12 @@ from typing import Any, List, Optional
 
 from .ble_client import MedicalBleClient, _brief, scan_devices, setup_logging
 from .common.hexutil import ms_timestamp
-from .common.winrt_errors import is_windows
+from .common.winrt_errors import (
+    is_windows,
+    os_pair_supported,
+    pairing_ui_hint,
+    remove_bond_instructions,
+)
 from .profiles import DeviceProfile, get_profile
 
 log = logging.getLogger("medical_ble.live")
@@ -179,12 +184,12 @@ def classify_failure(exc: BaseException, *, brand_id: str = "") -> FailureHint:
     if "fe4a" in msg or "parent service not found" in msg:
         return FailureHint(
             code="OMRON_FE4A_MISSING",
-            short="FE4A missing after connect — Windows bond incomplete (not a parser issue)",
+            short="FE4A missing after connect — OS bond incomplete (not a parser issue)",
             tips=(
                 "1. Ctrl+C stop LIVE (PAIR is a one-time fix, not every cycle)",
-                "2. Windows Bluetooth → remove Omron/BLESmart / this MAC",
+                f"2. {remove_bond_instructions()}",
                 "3. Phone OMRON Connect → forget this cuff (one host only)",
-                "4. Cuff HOLD BT until flashing P → menu RE-PAIR → accept popup",
+                "4. Cuff HOLD BT until flashing P → menu RE-PAIR → accept pairing prompt",
                 "5. Then SHORT-press BT and run READ once (not LIVE) to verify",
                 "6. Only after READ works: restart LIVE (connects immediately, no long scan)",
             ),
@@ -194,14 +199,20 @@ def classify_failure(exc: BaseException, *, brand_id: str = "") -> FailureHint:
 
     if any(
         s in msg
-        for s in ("access denied", "not permitted", "insufficient authentication", "0x80070005")
+        for s in (
+            "access denied",
+            "not permitted",
+            "insufficient authentication",
+            "0x80070005",
+            "authentication required",
+        )
     ):
         return FailureHint(
             code="AUTH_DENIED",
             short="Encrypted GATT denied — need OS bond",
             tips=(
                 "Run PAIR (flashing P) then retry LIVE",
-                "Remove stale bond in Windows Bluetooth settings if needed",
+                remove_bond_instructions(),
             ),
             needs_pair=True,
             backoff_mult=1.5,
@@ -219,13 +230,23 @@ def classify_failure(exc: BaseException, *, brand_id: str = "") -> FailureHint:
             backoff_mult=1.0,
         )
 
-    if any(s in msg for s in ("scanner", "watcher", "aborted", "stopping")):
+    if any(
+        s in msg
+        for s in (
+            "scanner",
+            "watcher",
+            "aborted",
+            "stopping",
+            "not ready",
+            "in progress",
+        )
+    ):
         return FailureHint(
             code="SCANNER_BUSY",
-            short="Windows BLE scanner busy (WinRT)",
+            short="BLE scanner/adapter busy",
             tips=(
-                "Quick Settings → Bluetooth Off → wait 3s → On",
-                "Close nRF Connect / other BLE apps",
+                "Toggle Bluetooth Off → wait 3s → On (or bluetoothctl power off/on)",
+                "Close nRF Connect / other BLE apps / web UI if using CLI",
                 "LIVE still connects by MAC when known — retry",
             ),
             backoff_mult=1.2,
@@ -499,8 +520,8 @@ async def _cycle_omron_read(
             )
             state.tips = [
                 "Scan already proved transfer advertising works",
-                "Windows cannot open FE4A without a good OS bond",
-                "Ctrl+C → remove Windows bond → RE-PAIR (flashing P)",
+                "OS cannot open FE4A without a good bond",
+                f"Ctrl+C → {remove_bond_instructions()} → RE-PAIR (flashing P)",
                 "Unpair phone OMRON Connect first if it still owns the cuff",
                 "Verify with: omron read … then restart LIVE",
             ]
@@ -540,7 +561,7 @@ async def _cycle_beurer(state: LiveState) -> None:
     sess = BeurerCompanionSession(
         state.address,
         model_id=state.model,
-        pair=is_windows(),
+        pair=os_pair_supported(),
         duration=min(DEFAULT_LISTEN_S, state.interval_s * 0.6),
         connect_retries=2,
     )
@@ -599,7 +620,7 @@ async def _cycle_generic(
     client = MedicalBleClient(
         address=state.address,
         profile=profile,
-        pair=pair and is_windows(),
+        pair=pair and os_pair_supported(),
         connect_retries=2,
         auto_dispatch=profile.id in ("re_generic", "fora6"),
     )
@@ -643,7 +664,7 @@ async def _cycle_generic(
             state.tips = [
                 "1. Confirm MAC is NT-100B (scan name should look like NT-100 / Thermometer)",
                 "2. Take a forehead measurement, leave device on / advertising",
-                "3. Menu → PAIR once (accept Windows popup), then LIVE again",
+                f"3. Menu → PAIR once ({pairing_ui_hint()}), then LIVE again",
                 "4. If [GATT] lacks 0x1524: note which chars have Write+Notify — may be OEM UUID",
                 "5. Interval 5–15s is enough; 1s only reconnect thrash (needs ~18s session)",
             ]
@@ -708,7 +729,7 @@ async def _cycle_stream(
     client = MedicalBleClient(
         address=state.address,
         profile=profile,
-        pair=pair and is_windows(),
+        pair=pair and os_pair_supported(),
         connect_retries=2,
         on_reading=on_reading,
     )

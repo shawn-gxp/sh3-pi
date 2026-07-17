@@ -138,12 +138,18 @@ medical_ble_toolkit/
 ## Install
 
 ```powershell
-cd "C:\Users\Shawn A\Desktop\Medical project\experiments"
+# Windows
 pip install -r requirements.txt
 pip install -r omron_bp\requirements.txt
 ```
 
-`requirements.txt` already lists `bleak`.
+```bash
+# Linux (BlueZ) — see also ../LINUX.md
+./setup_linux.sh
+# or: pip install -r requirements.txt -r omron_bp/requirements.txt
+```
+
+`requirements.txt` already lists `bleak`. Works on **Windows (WinRT)** and **Linux (BlueZ)**.
 
 ---
 
@@ -157,8 +163,14 @@ regional/retail names, and support levels (**A** companion-like → **D** scaffo
 ## Interactive app (recommended)
 
 ```powershell
-cd "C:\Users\Shawn A\Desktop\Medical project\experiments"
+# Windows
 python -m medical_ble_toolkit
+```
+
+```bash
+# Linux
+./run_toolkit.sh
+# or: source .venv/bin/activate && python -m medical_ble_toolkit
 ```
 
 The wizard asks:
@@ -177,21 +189,21 @@ python -m medical_ble_toolkit interactive  # same
 
 ---
 
-## Windows 11 / WinRT debugging
+## Platform debugging (Windows WinRT / Linux BlueZ)
 
-On Windows, bleak uses **WinRT** (`BluetoothLEDevice`, `DeviceInformation.Pairing`).
-This toolkit logs explicit `[WINRT]` blocks when OS-level failures occur.
+On Windows, bleak uses **WinRT**. On Linux, bleak uses **BlueZ** over D-Bus.
+This toolkit logs `[WINRT]` or `[BLUEZ]` diagnosis blocks when OS-level failures occur.
 
 | Situation | What you see | What to do |
 |-----------|--------------|------------|
-| Pairing popup dismissed / cancelled | `PAIRING_DIALOG_DISMISSED` | Re-run with `--pair`, accept the Windows dialog (check taskbar) |
+| Pairing popup dismissed / cancelled | `PAIRING_DIALOG_DISMISSED` | Re-run with `--pair`, accept OS prompt (Windows popup / BlueZ agent) |
 | Pairing / connect hang | `TIMEOUT` | Wake device, increase `--connect-timeout 45`, retry |
 | Link dies mid discovery | `GATT_UNREACHABLE` | Live re-advertise; remove stale Bluetooth entry; reconnect |
 | Encrypted char without bond | `PAIRING_REQUIRED_OR_DENIED` | `--pair`, or pair in Settings → Bluetooth & devices |
 | Empty GATT tree after connect | warning in map | Same as Unreachable — advertising window closed |
 
-BP profiles (`beurer_bm54`, `and_ua651`) **auto-enable `--pair` on Windows**.
-Use `--no-pair` to skip. Dismissing the OS dialog is caught and logged, not swallowed.
+BP profiles (`beurer_bm54`, `and_ua651`, …) **auto-enable `--pair` on Windows and Linux**.
+Use `--no-pair` to skip. Dismissing the OS dialog / agent is caught and logged, not swallowed.
 
 Every notification logs **before parse**:
 
@@ -217,7 +229,7 @@ python -m medical_ble_toolkit --list-profiles
 python -m medical_ble_toolkit --profile beurer_bm54 --scan
 
 # Connect + listen 90s (hex dumps on every notification)
-# On Windows, --pair is auto-enabled for BM54 / UA-651
+# On Windows/Linux, --pair is auto-enabled for BM54 / UA-651
 python -m medical_ble_toolkit --profile beurer_bm54 --address AA:BB:CC:DD:EE:FF -t 90
 
 # Explicit pairing (OS dialog — ACCEPT it; do not dismiss)

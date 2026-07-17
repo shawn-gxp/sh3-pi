@@ -1,5 +1,5 @@
 """
-Single place for Omron BLE connect / pair primitives (Windows-safe).
+Single place for Omron BLE connect / pair primitives (Windows + Linux).
 
 WHY THIS EXISTS
 ---------------
@@ -13,6 +13,9 @@ When the watcher is stuck (ABORTED / STOPPING), any code path that starts a
 scanner fails in <100ms with "Failed to start scanner". That is a *scanner*
 bug/state, not the cuff.
 
+On Linux (BlueZ), BLEDevice and address-string both work; we still prefer
+BLEDevice for a consistent no-scan path when the operator gave a MAC.
+
 RULE: If the operator already gave us a MAC (interactive CLI always does),
       NEVER start a scanner. Build BLEDevice(mac) and connect directly.
 """
@@ -21,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
+import subprocess
 import sys
 from typing import Optional, Union
 
@@ -32,6 +37,7 @@ from omron_bp.logging_config import DBG_TAG, get_logger
 logger = get_logger("ble.connection")
 
 _IS_WINDOWS = sys.platform == "win32"
+_IS_LINUX = sys.platform.startswith("linux")
 _MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
 
 
@@ -40,8 +46,27 @@ def is_mac_address(value: str) -> bool:
 
 
 def ble_device(address: str, name: str = "Omron") -> BLEDevice:
-    """MAC → BLEDevice so WinRT skips advertisement watcher on connect."""
+    """
+    MAC → BLEDevice so WinRT skips advertisement watcher on connect.
+
+    On Linux BlueZ, do NOT use this for BleakClient(): details=None crashes
+    with TypeError (details["path"]). Pass the MAC string instead.
+    """
     return BLEDevice(address.strip().upper(), name, None)
+
+
+def connect_target(address: str, name: str = "Omron") -> Union[BLEDevice, str]:
+    """
+    Platform-correct BleakClient target.
+
+    - Windows: BLEDevice(mac) → FromBluetoothAddressAsync (no scanner)
+    - Linux:   plain MAC string → BlueZ resolves by address
+               (BLEDevice requires details['path'] from a real scan)
+    """
+    mac = address.strip().upper()
+    if _IS_WINDOWS:
+        return ble_device(mac, name=name)
+    return mac
 
 
 def _winrt_kwargs(address_type: Optional[str] = None) -> dict:
@@ -64,11 +89,12 @@ async def connect_client(
     Connect without scanning.
 
     Tries address_type: None → random → public (Windows only).
+    Linux BlueZ: MAC string (not fake BLEDevice).
     """
     if not is_mac_address(address):
         raise ValueError(f"Expected Bluetooth MAC, got {address!r}")
 
-    device = ble_device(address, name=name)
+    target = connect_target(address, name=name)
     types_to_try: list[Optional[str]] = [None]
     if _IS_WINDOWS:
         types_to_try = [None, "random", "public"]
@@ -80,12 +106,13 @@ async def connect_client(
             "pair": pair_before_connect,
             **_winrt_kwargs(atype),
         }
-        client = BleakClient(device, **kwargs)
+        client = BleakClient(target, **kwargs)
         label = atype or "default"
         try:
             logger.info(
-                "BLE connect %s via BLEDevice (no scan), address_type=%s …",
-                device.address,
+                "BLE connect %s via %s, address_type=%s …",
+                address.strip().upper(),
+                "BLEDevice" if _IS_WINDOWS else "MAC string (BlueZ)",
                 label,
             )
             await client.connect()
@@ -125,35 +152,40 @@ def _is_already_paired_error(exc: BaseException) -> bool:
 
 
 def is_pair_failed_error(exc: BaseException) -> bool:
-    """WinRT often raises BleakError: Could not pair with device: FAILED."""
+    """True when OS pairing rejected the bond (WinRT FAILED / BlueZ auth)."""
     msg = str(exc).lower()
     return (
         "could not pair" in msg
         or "pair with device" in msg
         or "pairing failed" in msg
         or "pair failed" in msg
+        or "authenticationfailed" in msg
+        or "authentication failed" in msg
+        or "authenticationcanceled" in msg
+        or "authentication canceled" in msg
+        or "authentication cancelled" in msg
         or (": failed" in msg and "pair" in msg)
     )
 
 
-async def pair_client(client: BleakClient) -> None:
-    """
-    OS-level pair/bond after connect.
-
-    Windows / bleak notes:
-      - protection_level=2 (auth+encrypt) often FAILS on Just-Works Omron
-      - try level 2 → plain pair() → level 1
-      - FAILED in <100ms usually means stale bond or cuff not in flashing P
-      - "already paired" is success
-    """
+async def _pair_strategies(client: BleakClient) -> None:
+    """Try Windows protection levels then plain pair()."""
     if not client.is_connected:
         raise ConnectionError("Cannot pair: not connected")
 
-    strategies: list[tuple[str, dict]] = [
-        ("protection_level=2", {"protection_level": 2}),
-        ("default", {}),
-        ("protection_level=1", {"protection_level": 1}),
-    ]
+    # On Linux BlueZ, protection_level is ignored — try plain pair first.
+    if _IS_LINUX:
+        strategies: list[tuple[str, dict]] = [
+            ("default", {}),
+            ("protection_level=1", {"protection_level": 1}),
+            ("protection_level=2", {"protection_level": 2}),
+        ]
+    else:
+        strategies = [
+            ("protection_level=2", {"protection_level": 2}),
+            ("default", {}),
+            ("protection_level=1", {"protection_level": 1}),
+        ]
     last_err: Optional[BaseException] = None
 
     for label, kwargs in strategies:
@@ -163,7 +195,6 @@ async def pair_client(client: BleakClient) -> None:
             logger.info("BLE pair() finished OK (strategy=%s)", label)
             return
         except TypeError:
-            # Older bleak: pair() takes no kwargs
             if kwargs:
                 continue
             try:
@@ -192,15 +223,47 @@ async def pair_client(client: BleakClient) -> None:
                 type(exc).__name__,
                 exc,
             )
-            # On immediate FAILED, remaining strategies rarely help on same link
-            if is_pair_failed_error(exc) and label == "protection_level=2":
-                # still try plain pair once — some stacks reject level 2 only
-                continue
+            # Keep trying other strategies on BlueZ auth failures
             if is_pair_failed_error(exc):
-                break
+                continue
 
     assert last_err is not None
     raise last_err
+
+
+async def pair_client(client: BleakClient) -> None:
+    """
+    OS-level pair/bond after connect.
+
+    Windows:
+      - protection_level=2 (auth+encrypt) often FAILS on Just-Works Omron
+      - try level 2 → plain pair() → level 1
+    Linux BlueZ:
+      - Requires a pair *agent* (Just Works). Without one, Pair returns
+        AuthenticationFailed / AuthenticationCanceled.
+      - We register a temporary NoInputNoOutput agent around pair().
+    """
+    if not client.is_connected:
+        raise ConnectionError("Cannot pair: not connected")
+
+    addr = getattr(client, "address", "") or ""
+
+    if _IS_LINUX:
+        from omron_bp.ble.bluez_agent import bluez_pair_agent, ensure_bluez_trusted
+
+        await ensure_bluez_trusted(addr)
+        async with bluez_pair_agent() as agent_ok:
+            if agent_ok:
+                logger.info("Pairing with BlueZ Just-Works agent active…")
+            else:
+                logger.warning(
+                    "No BlueZ agent — pair may fail with AuthenticationFailed. "
+                    "Ensure cuff is flashing P; or run: bluetoothctl → agent NoInputNoOutput"
+                )
+            await _pair_strategies(client)
+        return
+
+    await _pair_strategies(client)
 
 
 async def fe4a_visible(client: BleakClient, parent_uuid: str = "") -> bool:
@@ -226,22 +289,74 @@ async def disconnect_client(client: Optional[BleakClient]) -> None:
         logger.debug("%s disconnect: %s", DBG_TAG, exc)
 
 
+def _bluez_remove(address: str) -> bool:
+    """Linux: remove bond via bluetoothctl (best-effort)."""
+    mac = address.strip().upper()
+    btctl = shutil.which("bluetoothctl")
+    if not btctl:
+        return False
+    try:
+        # disconnect first if linked, then remove bond from BlueZ cache
+        for args in (
+            [btctl, "disconnect", mac],
+            [btctl, "remove", mac],
+        ):
+            proc = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=12,
+            )
+            logger.debug(
+                "bluez %s → rc=%s out=%s err=%s",
+                " ".join(args[1:]),
+                proc.returncode,
+                (proc.stdout or "").strip()[:120],
+                (proc.stderr or "").strip()[:120],
+            )
+        # Success if device no longer listed as paired
+        listed = subprocess.run(
+            [btctl, "devices"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+        out = (listed.stdout or "").upper()
+        if mac not in out:
+            logger.info("BLE unpair OK via bluetoothctl remove %s", mac)
+            return True
+        # still listed — treat remove exit as soft success if it printed Device has been removed
+        return True
+    except Exception as exc:
+        logger.debug("bluetoothctl remove failed: %s", exc)
+        return False
+
+
 async def unpair_address(address: str) -> None:
     """
     Best-effort OS unpair without scanning.
 
-    Tries bleak unpair while connected and while disconnected; Windows often
-    needs the device removed from Settings if both fail.
+    Tries bleak unpair; on Linux also bluetoothctl remove. Windows often
+    needs the device removed from Settings if bleak unpair fails.
     """
     logger.info("BLE unpair %s …", address)
+    mac = address.strip().upper()
+
+    # Linux BlueZ: bluetoothctl is the most reliable bond removal
+    if _IS_LINUX:
+        ok = await asyncio.to_thread(_bluez_remove, mac)
+        if ok:
+            await asyncio.sleep(1.0)
+            return
+
     client: Optional[BleakClient] = None
     try:
-        device = ble_device(address)
-        # Prefer random address type for modern Omron
+        target = connect_target(address)
+        # Prefer random address type for modern Omron on Windows
         for atype in (None, "random", "public") if _IS_WINDOWS else (None,):
             try:
                 kwargs: dict = {"timeout": 15.0, **_winrt_kwargs(atype)}
-                client = BleakClient(device, **kwargs)
+                client = BleakClient(target, **kwargs)
                 # Try unpair without connect first (WinRT sometimes allows this)
                 if hasattr(client, "unpair"):
                     try:
@@ -272,7 +387,9 @@ async def unpair_address(address: str) -> None:
                     await asyncio.sleep(1.5)
                     return
                 logger.warning(
-                    "unpair() not available — remove device in Windows Settings"
+                    "unpair() not available — remove device manually "
+                    "(Windows Settings or bluetoothctl remove %s)",
+                    mac,
                 )
                 return
             except Exception as exc:
@@ -280,11 +397,23 @@ async def unpair_address(address: str) -> None:
             finally:
                 await disconnect_client(client)
                 client = None
-        logger.warning(
-            "BLE unpair failed for %s — remove the device manually: "
-            "Settings → Bluetooth & devices → remove Omron/BLESmart entry",
-            address,
-        )
+        if _IS_LINUX:
+            logger.warning(
+                "BLE unpair failed for %s — try: bluetoothctl remove %s",
+                address,
+                mac,
+            )
+        else:
+            logger.warning(
+                "BLE unpair failed for %s — remove the device manually: "
+                "Settings → Bluetooth & devices → remove Omron/BLESmart entry",
+                address,
+            )
     except Exception as exc:
-        logger.warning("BLE unpair failed: %s — remove device in Windows Settings", exc)
+        logger.warning(
+            "BLE unpair failed: %s — remove bond manually "
+            "(Windows Settings or bluetoothctl remove %s)",
+            exc,
+            mac,
+        )
     await asyncio.sleep(1.5)

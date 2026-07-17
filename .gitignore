@@ -38,3 +38,7 @@ datasheets/beurer/tools/
 datasheets/beurer/extracted/
 datasheets/beurer/decompiled/
 phoneblelog/*.cfa
+
+# Runtime local databases
+*.db
+medical_ble_web/data/*.db

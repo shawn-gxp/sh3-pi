@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -186,6 +187,45 @@ def _pick_newest(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return max(clinical, key=_ts_key)
 
 
+@asynccontextmanager
+async def _pause_hub_for_manual(reason: str = "manual"):
+    """
+    Yield radio to UI Scan/Pair: pause hub hunt, wait for concurrent workers
+    to finish (or timeout), then hold _ble_lock so BlueZ is not double-scanned.
+    """
+    hub = _daemon_hub
+    if hub is not None:
+        try:
+            hub.request_manual_pause()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("hub pause: %s", exc)
+        # Wait until no concurrent workers (up to ~120s for MightySat stream)
+        for _ in range(400):
+            try:
+                n = 0
+                if hasattr(hub, "conn_mgr"):
+                    n = hub.conn_mgr.active_count
+                phase = (hub.status.phase or "") if hub else ""
+            except Exception:
+                n = 0
+                phase = ""
+            if n <= 0 and phase not in ("session", "concurrent"):
+                break
+            await asyncio.sleep(0.3)
+        await asyncio.sleep(0.35)
+    try:
+        async with _ble_lock:
+            log.info("[RADIO] manual op start (%s)", reason)
+            yield
+            log.info("[RADIO] manual op end (%s)", reason)
+    finally:
+        if hub is not None:
+            try:
+                hub.clear_manual_pause()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("hub unpause: %s", exc)
+
+
 async def job_scan(
     *,
     brand_id: Optional[str] = None,
@@ -199,20 +239,36 @@ async def job_scan(
     brand = get_brand(brand_id or "")
     if brand and brand.get("connect_profile"):
         try:
-            # Unfiltered scan is better for discovery; still load profile for filter
-            # when brand explicitly set — use None for broad scan if brand empty
             if brand_id:
                 profile = get_profile(brand["connect_profile"])
         except KeyError:
             profile = None
 
-    async with _ble_lock:
-        # Broad scan when no brand — easier to find new devices
-        use_profile = profile if brand_id else None
-        devices = await scan_devices(profile=use_profile, timeout=timeout)
+    use_profile = profile if brand_id else None
+    devices: List[Any] = []
+    last_err: Optional[BaseException] = None
+
+    async with _pause_hub_for_manual("scan"):
+        for attempt in (1, 2):
+            try:
+                devices = await scan_devices(
+                    profile=use_profile,
+                    timeout=timeout,
+                    retries=2,
+                )
+                last_err = None
+                if devices:
+                    break
+                # Empty list can mean BlueZ busy returned [] — brief retry
+                if attempt == 1:
+                    await asyncio.sleep(0.8)
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                log.warning("job_scan attempt %d: %s", attempt, exc)
+                await asyncio.sleep(0.8)
 
     out: List[Dict[str, Any]] = []
-    for d in devices:
+    for d in devices or []:
         out.append(
             {
                 "mac": (getattr(d, "address", "") or "").upper(),
@@ -220,7 +276,24 @@ async def job_scan(
                 "rssi": getattr(d, "rssi", None),
             }
         )
+    # Prefer named / medical-looking first for UI
+    def _rank(row: Dict[str, Any]) -> tuple:
+        n = (row.get("name") or "").lower()
+        named = 0 if n and n != "(no name)" else 1
+        return (named, -(row.get("rssi") or -999))
+
+    out.sort(key=_rank)
     db.save_scan_hits(out)
+    if not out and last_err is not None:
+        raise BleJobError(
+            f"Scan failed: {last_err}",
+            code="SCAN_BUSY",
+            tips=[
+                "Hub was using the radio — try Scan again.",
+                "Only one BLE scan at a time on this Pi.",
+            ],
+            retryable=True,
+        )
     return out
 
 
@@ -256,11 +329,11 @@ def _omron_fe4a_error(exc: BaseException) -> BleJobError:
         code="OMRON_FE4A_MISSING",
         retryable=True,
         tips=[
-            "FE4A missing = Windows cannot open Omron private service (bond/mode).",
+            "FE4A missing = OS cannot open Omron private service (bond/mode).",
             "If Sync usually works without a button: wait 2s and Sync again.",
             "If still failing: SHORT-press BT (transfer), then Sync immediately.",
             "Long-hold flashing P is for PAIR only, not every Sync.",
-            "Persistent fail: remove cuff in Windows Bluetooth → Re-pair → Sync.",
+            "Persistent fail: remove OS bond (bluetoothctl remove MAC or OS Settings) → Re-pair → Sync.",
             "Phone OMRON Connect must not own the bond (one host only).",
         ],
     )
@@ -295,7 +368,8 @@ async def job_pair(
     )
 
     try:
-        async with _ble_lock:
+        # Pause hub hunt so BlueZ is free for OS pair / GATT
+        async with _pause_hub_for_manual("repair" if repair else "pair"):
             if brand.get("is_omron"):
                 from medical_ble_toolkit.omron_bridge import pair_omron
 
@@ -338,32 +412,41 @@ async def job_pair(
             "profile": profile_id,
             "session_id": sid,
         }
+        # Hub-only bond policy (dedicated Pi collector)
+        hub_tips = [
+            "Pair ONLY with this hub — unpair any phone companion first.",
+            "Hub owns the bond; leave Auto-sync ON after Pair.",
+        ]
         if brand.get("is_omron"):
-            out["next_steps"] = [
-                "Pair OK. Many setups Sync without any button if the bond is solid.",
-                "The Unified Daemon will now track this device automatically.",
-                "If Sync fails (FE4A): SHORT-press BT once, then it will auto-sync.",
+            out["next_steps"] = hub_tips + [
+                "Omron: hub dumps history every omron_poll_interval_s "
+                "(default 5 min — edit hub_config.json).",
+                "If FE4A missing: RE-PAIR on hub with cuff flashing P.",
             ]
-            # Let Windows finish storing the bond before a frantic re-connect
             await asyncio.sleep(1.5)
         elif brand.get("is_nipro") or brand_id.startswith("nipro") or brand_id == "thermo":
-            out["next_steps"] = [
-                "Paired. Take a measurement on the device.",
-                "The Unified Daemon will automatically capture the history dump.",
+            out["next_steps"] = hub_tips + [
+                "Measure on device — hub connects within ~1m05s BLE window.",
+                "No phone; store exact advertised name at Pair.",
             ]
         elif brand_id == "masimo":
-            out["next_steps"] = [
-                "Paired. Keep your finger in the sensor.",
-                "The Unified Daemon will automatically start the live SpO2 stream.",
+            out["next_steps"] = hub_tips + [
+                "Put finger in sensor — hub starts full live SpO2 stream on AD.",
             ]
+        else:
+            out["next_steps"] = hub_tips
             
-        # Auto-start the unified daemon if it's not already running
-        if not _daemon_status.get("active"):
-            try:
-                await job_daemon_start()
-            except Exception as exc:
-                log.warning("Failed to auto-start unified daemon: %s", exc)
-                
+        # Hands-free: start auto-sync so the next measurement is pulled
+        # without UI Sync (device must advertise / stay connectable).
+        try:
+            await job_daemon_start()
+            out["auto_sync"] = True
+            out["next_steps"] = list(out.get("next_steps") or []) + [
+                "Auto-sync is ON — measure on the device; data should appear without Sync.",
+            ]
+        except Exception as exc:
+            log.warning("Auto-start auto-sync failed: %s", exc)
+            out["auto_sync"] = False
         return out
     except Exception as exc:  # noqa: BLE001
         db.end_session(sid, "fail", error=str(exc))
@@ -379,10 +462,10 @@ async def _generic_pair(
     force_rebind: bool,
 ) -> None:
     from medical_ble_toolkit.ble_client import MedicalBleClient
-    from medical_ble_toolkit.common.winrt_errors import is_windows
+    from medical_ble_toolkit.common.winrt_errors import os_pair_supported
     from medical_ble_toolkit.profiles import get_profile
 
-    if force_rebind and is_windows():
+    if force_rebind and os_pair_supported():
         try:
             from omron_bp.ble.connection import unpair_address
 
@@ -401,12 +484,8 @@ async def _generic_pair(
         return
 
     profile = get_profile(profile_id)
-    need_pair = is_windows() and profile_id in (
-        "nipro_nmbp",
-        "and_ua651",
-        "beurer_bp",
-        "beurer_bm54",
-    )
+    # Bond on Windows/Linux for medical meters that use encrypted GATT
+    need_pair = os_pair_supported() and brand_id not in ("nipro_nt100b", "thermo")
     # short pair session for Nipro companion (register + light connect)
     duration = 12.0 if brand_id == "masimo" else 8.0
     if profile_id.startswith("nipro_") or profile_id == "mightysat":
@@ -414,11 +493,21 @@ async def _generic_pair(
     client = MedicalBleClient(
         address=mac,
         profile=profile,
-        pair=need_pair or (is_windows() and brand_id not in ("nipro_nt100b", "thermo")),
+        pair=need_pair,
         connect_retries=2,
         auto_dispatch=profile_id in ("re_generic", "fora6"),
     )
     await client.run(duration=duration, connect_timeout=35.0)
+
+
+@asynccontextmanager
+async def _maybe_ble_lock(exclusive: bool):
+    """Exclusive radio for manual Sync; hub concurrent workers skip this."""
+    if exclusive:
+        async with _ble_lock:
+            yield
+    else:
+        yield
 
 
 async def job_sync(
@@ -428,8 +517,14 @@ async def job_sync(
     model: str = "",
     listen_s: float = 30.0,
     on_reading_cb: Optional[Callable[[], None]] = None,
+    exclusive_radio: bool = True,
 ) -> Dict[str, Any]:
-    """One-shot read/sync for the brand; store clinical readings in SQLite."""
+    """
+    One-shot read/sync for the brand; store clinical readings in SQLite.
+
+    exclusive_radio=True  — hold global BLE lock (UI / single-session).
+    exclusive_radio=False — concurrent hub workers (multi BleakClient).
+    """
     brand = get_brand(brand_id)
     if not brand:
         raise ValueError(f"Unknown brand: {brand_id}")
@@ -448,26 +543,30 @@ async def job_sync(
     collected: List[Dict[str, Any]] = []
 
     try:
-        async with _ble_lock:
+        async with _maybe_ble_lock(exclusive_radio):
             if brand.get("is_omron"):
                 from medical_ble_toolkit.omron_bridge import (
                     flatten_readings,
                     read_omron,
                 )
 
-                # READ needs transfer mode (short-press BT), not flashing P.
-                # One quick retry: often user still has cuff in P or bond is settling.
+                # Direct MAC connect (Win11 parity). Omron BLE often stays up for
+                # hours after last use — no button / no active measurement required.
                 last_omron_exc: Optional[BaseException] = None
                 all_users = None
                 for attempt in (1, 2):
                     try:
                         if attempt == 2:
                             log.warning(
-                                "Omron READ retry 2/2 — short-press BT (transfer) now…"
+                                "Omron READ retry 2/2 — direct reconnect "
+                                "(cuff may still be in long post-session window)…"
                             )
-                            await asyncio.sleep(2.0)
+                            await asyncio.sleep(1.5)
                         all_users = await read_omron(
-                            mac_u, model, find_timeout=45.0, session_retries=2
+                            mac_u,
+                            model,
+                            find_timeout=15.0,  # direct path; scan not required
+                            session_retries=2,
                         )
                         last_omron_exc = None
                         break
@@ -552,7 +651,7 @@ async def job_sync(
                     raise RuntimeError(result.message or str(result.status))
             else:
                 from medical_ble_toolkit.ble_client import MedicalBleClient
-                from medical_ble_toolkit.common.winrt_errors import is_windows
+                from medical_ble_toolkit.common.winrt_errors import os_pair_supported
                 from medical_ble_toolkit.profiles import get_profile
 
                 profile_id = resolve_profile_id(brand, model)
@@ -569,25 +668,27 @@ async def job_sync(
                 )
                 is_nipro_cf = brand_id == "nipro_cf" or profile_id == "nipro_cf"
                 # Session length by brand (companion defaults ~60s receive)
-                if is_thermo or is_nipro_bp or is_nipro_cf or brand_id == "and":
+                if brand_id == "masimo":
+                    # Stream while finger on; cap so hub can return to hunt
+                    duration = max(20.0, min(float(listen_s), 180.0))
+                elif is_thermo or is_nipro_bp or is_nipro_cf or brand_id == "and":
                     # Companion receive timeout ~60s; quiet-end finishes earlier
                     duration = max(45.0, float(listen_s))
-                elif brand_id == "masimo":
-                    duration = max(20.0, listen_s)
                 else:
                     duration = listen_s
 
-                # Thermo / NT: skip re-pair every sync (eats BLE window)
+                # Never re-pair mid post-measure window (eats BLE time).
+                # NBP still needs OS bond once — soft pair only if never paired.
                 dev_row = db.get_device_by_mac(mac_u) or {}
                 already_paired = bool(dev_row.get("paired"))
-                if is_thermo or brand_id in ("nipro_nt100b", "thermo"):
-                    do_pair = False  # never re-pair mid window
+                if is_thermo or brand_id in ("nipro_nt100b", "thermo", "nipro_nbp"):
+                    do_pair = False
                 elif profile_id in ("nipro_nmbp", "and_ua651"):
-                    do_pair = is_windows()
+                    do_pair = os_pair_supported() and not already_paired
                 elif brand_id.startswith("nipro") or brand.get("is_nipro"):
-                    do_pair = is_windows() and not already_paired
+                    do_pair = os_pair_supported() and not already_paired
                 else:
-                    do_pair = is_windows()
+                    do_pair = os_pair_supported() and not already_paired
 
                 def _live_cb(r: Any) -> None:
                     nonlocal stored
@@ -624,14 +725,19 @@ async def job_sync(
                             collected.append(row)
                             if rid is not None:
                                 stored += 1
+                                # Always refresh dashboard on new clinical row
+                                _push_dashboard(highlight_mac=mac_u)
                             if on_reading_cb:
                                 on_reading_cb()
 
-                # Omron-like post-measure: hunt device after reading (short BLE window)
+                # Post-measure: hub already saw AD → short connect retries only.
+                # Long find_window eats the ~65s BLE window (NBP got 0 readings).
                 find_to = 0.0
                 name_hint = (
                     (dev_row.get("name") or model or brand.get("default_model") or "")
                 ).strip()
+                connect_retries = 2 if not is_thermo else 1
+                connect_to = 30.0 if is_thermo else 35.0
                 if (
                     brand.get("is_nipro")
                     or brand_id.startswith("nipro")
@@ -639,31 +745,42 @@ async def job_sync(
                 ):
                     from medical_ble_toolkit.nipro import post_measure as pm
 
-                    find_to = pm.find_window_for(profile_id)
-                    duration = max(duration, pm.receive_s_for(profile_id))
+                    if brand_id != "masimo":
+                        duration = max(duration, pm.receive_s_for(profile_id))
+                    # Brief retry only (device just advertised)
+                    find_to = 12.0 if (is_nipro_bp or is_thermo or brand_id == "masimo") else 0.0
+                    connect_retries = 4 if find_to > 0 else connect_retries
+                    connect_to = 12.0 if find_to > 0 else connect_to
                     log.info(
                         "[POST-MEASURE] web sync find=%.0fs receive=%.0fs profile=%s "
-                        "(measure first, then Sync — display may already be off)",
+                        "pair=%s",
                         find_to,
                         duration,
                         profile_id,
+                        do_pair,
                     )
 
                 client = MedicalBleClient(
                     address=mac_u,
                     profile=profile,
                     pair=do_pair,
-                    connect_retries=5 if find_to > 0 else (2 if not is_thermo else 1),
+                    connect_retries=connect_retries,
                     on_reading=_live_cb,
                     auto_dispatch=profile_id in ("re_generic", "fora6"),
                     find_timeout=find_to,
                     name_hint=name_hint,
                 )
-                # NT-100B / Nipro: toolkit quiet-end + bulk history dump
+                from medical_ble_toolkit.nipro import post_measure as pm2
+
+                # MightySat: no quiet-end (stream until radio drops / duration)
+                if brand_id == "masimo" or profile_id == "mightysat":
+                    qt = 0.0
+                else:
+                    qt = pm2.quiet_s_for(profile_id)
                 await client.run(
                     duration=duration,
-                    connect_timeout=15.0 if find_to > 0 else (30.0 if is_thermo else 35.0),
-                    quiet_timeout=None,
+                    connect_timeout=connect_to,
+                    quiet_timeout=qt,
                 )
                 # Ensure Nipro registry has exact name for hands-free
                 if brand.get("is_nipro") or brand_id.startswith("nipro"):
@@ -730,7 +847,7 @@ async def job_sync(
             out["tips"] = [
                 "1. Complete a BP measurement on the cuff first.",
                 "2. Keep the cuff near the PC and click Sync (history indicates after clock).",
-                "3. NMBP: Pair once with Windows bond if indications never arrive.",
+                "3. NMBP: Pair once (OS bond) if indications never arrive.",
             ]
         return out
     except BleJobError as exc:
@@ -755,6 +872,7 @@ async def job_live_start(
     max_reconnects: int = 30,
     reconnect_delay_s: float = 2.5,
     stale_vitals_s: float = 20.0,
+    store_every_clinical: bool = False,
 ) -> Dict[str, Any]:
     """
     Start background LIVE stream (Masimo SpO2 etc.).
@@ -815,7 +933,7 @@ async def job_live_start(
         import time as _time
 
         from medical_ble_toolkit.ble_client import MedicalBleClient
-        from medical_ble_toolkit.common.winrt_errors import is_windows
+        from medical_ble_toolkit.common.winrt_errors import os_pair_supported
         from medical_ble_toolkit.profiles import get_profile
 
         last_db_mono = 0.0
@@ -851,7 +969,11 @@ async def job_live_start(
                 f"{row.get('perfusion_index')}"
             )
             mono = _time.monotonic()
-            if key != last_spo2_key or (mono - last_db_mono) >= 5.0:
+            # Full stream (hub): store every clinical packet; else throttle ~5s
+            should_store = store_every_clinical or (
+                key != last_spo2_key or (mono - last_db_mono) >= 5.0
+            )
+            if should_store:
                 last_spo2_key = key
                 last_db_mono = mono
                 try:
@@ -870,6 +992,7 @@ async def job_live_start(
                         glucose_mg_dl=row.get("glucose_mg_dl"),
                         payload=row.get("payload"),
                         raw_hex=row.get("raw_hex") or "",
+                        dedupe=not store_every_clinical,
                     )
                     if rid is not None:
                         _push_dashboard(highlight_mac=mac_u)
@@ -915,7 +1038,7 @@ async def job_live_start(
                 )
 
                 # First attempt may pair if never bonded; later reconnects skip pair
-                do_pair = is_windows() and not already_paired and attempt == 1
+                do_pair = os_pair_supported() and not already_paired and attempt == 1
                 client = MedicalBleClient(
                     address=mac_u,
                     profile=profile,
@@ -1232,7 +1355,7 @@ async def job_cycle_start(
     """
     Auto-cycle: spend ``slot_s`` seconds on each saved device in turn.
 
-    Windows BLE is one radio — devices are read sequentially, but the dashboard
+    BLE is one radio — devices are read sequentially, but the dashboard
     always shows *all* devices' latest vitals together. Highlight follows the
     active slot.
 
@@ -1706,28 +1829,161 @@ async def job_nipro_handsfree_stop() -> Dict[str, Any]:
     return {"ok": True, "handsfree": handsfree_status()}
 
 # ---------------------------------------------------------------------------
-# Unified Daemon (Seamless Pairing + Auto-Reconnection)
+# Hub auto-sync — Tier-1 dedicated Pi collector
+#   HUNT (scan) → SESSION (one device) → HUNT
+#   NBP / NT / MightySat: connect on advertisement
+#   Omron: editable poll (default 5 min) + opportunistic AD
+#   Config: hub_config.json (repo root) or $MEDICAL_HUB_CONFIG
 # ---------------------------------------------------------------------------
 
 _daemon_task: Optional[asyncio.Task] = None
-_daemon_stop = asyncio.Event()
+_daemon_hub: Any = None
 _daemon_status: Dict[str, Any] = {
     "active": False,
     "status": "idle",
+    "phase": "idle",
     "message": "",
     "updated_at": "",
+    "last_mac": "",
+    "last_brand": "",
+    "last_result": "",
+    "last_stored": 0,
+    "last_reason": "",
+    "scan_round": 0,
+    "paired_count": 0,
+    "omron_next_s": None,
+    "config_omron_poll_s": 300.0,
+    "concurrent_active": 0,
+    "max_concurrent": 4,
+    "active_sessions": [],
 }
+
 
 def daemon_status() -> Dict[str, Any]:
     return dict(_daemon_status)
 
-async def job_daemon_start(*, duration_s: float = 28800.0) -> Dict[str, Any]:
-    global _daemon_task
-    
+
+def _daemon_now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _hub_roster() -> List[Dict[str, Any]]:
+    """Paired Tier-1 devices from SQLite."""
+    devices = db.list_devices()
+    paired = [d for d in devices if d.get("paired")]
+    if not paired:
+        paired = [d for d in devices if d.get("mac") and d.get("brand")]
+    return paired
+
+
+async def _hub_run_session(target: Any) -> Dict[str, Any]:
+    """
+    Execute one brand session for the hub worker.
+
+    exclusive_radio=False so multiple devices can hold GATT links at once
+    (BlueZ multi-connect). Scan/Pair still pause the hub and take _ble_lock.
+    """
+    from medical_ble_toolkit.hub.config import load_hub_config
+    from medical_ble_toolkit.hub.policy import is_stream
+
+    cfg = load_hub_config()
+    brand_id = (target.brand or "").lower()
+    mac = (target.mac or "").upper()
+    model = target.model or ""
+    reason = getattr(target, "reason", "") or ""
+
+    log.info(
+        "[HUB] transfer brand=%s mac=%s model=%s reason=%s concurrent=1",
+        brand_id,
+        mac,
+        model,
+        reason,
+    )
+    _push_dashboard(highlight_mac=mac)
+
+    try:
+        if is_stream(brand_id) or brand_id == "masimo":
+            listen = min(float(cfg.mightysat_live_max_s), 180.0)
+            log.info(
+                "[HUB] MightySat stream session mac=%s max=%.0fs (finger must be in)",
+                mac,
+                listen,
+            )
+
+            def _on_ms() -> None:
+                _push_dashboard(highlight_mac=mac)
+
+            result = await job_sync(
+                brand_id="masimo",
+                mac=mac,
+                model=model or "MightySat",
+                listen_s=listen,
+                on_reading_cb=_on_ms,
+                exclusive_radio=False,
+            )
+            stored = int(result.get("stored") or 0)
+            if cfg.print_readings and result.get("latest"):
+                log.info("[HUB][READING][live] %s", result.get("latest"))
+            ok = bool(result.get("ok", True)) and stored > 0
+            return {
+                "ok": ok,
+                "stored": stored,
+                "readings": result.get("readings") or [],
+                "latest": result.get("latest"),
+                "error": None if ok else "no SpO2 samples (finger out / BLE off?)",
+                "session_id": result.get("session_id"),
+            }
+
+        listen = cfg.receive_s(brand_id)
+
+        def _on_reading() -> None:
+            _push_dashboard(highlight_mac=mac)
+
+        result = await job_sync(
+            brand_id=brand_id,
+            mac=mac,
+            model=model,
+            listen_s=listen,
+            on_reading_cb=_on_reading,
+            exclusive_radio=False,
+        )
+        if cfg.print_readings:
+            for row in (result.get("readings") or [])[:30]:
+                log.info("[HUB][READING] %s", row)
+            if result.get("latest"):
+                log.info("[HUB][LATEST] %s", result.get("latest"))
+        return {
+            "ok": bool(result.get("ok", True)),
+            "stored": int(result.get("stored") or 0),
+            "readings": result.get("readings") or [],
+            "latest": result.get("latest"),
+            "error": result.get("error"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[HUB] session error brand=%s mac=%s: %s", brand_id, mac, exc)
+        return {"ok": False, "stored": 0, "error": str(exc), "readings": []}
+    finally:
+        _push_dashboard(highlight_mac="")
+
+
+async def job_daemon_start(*, duration_s: float = 86400.0 * 7) -> Dict[str, Any]:
+    """
+    Tier-1 Pi hub auto-sync.
+
+    Pair once on this hub (no phone) → leave running → measure.
+    NBP / NT / MightySat: connect as soon as they advertise.
+    Omron: every omron_poll_interval_s (default 300 = 5 min; edit hub_config.json).
+    """
+    global _daemon_task, _daemon_hub
+
     if _daemon_task and not _daemon_task.done():
-        return {"ok": True, "message": "Daemon already running", "daemon": daemon_status()}
-    
-    # Ensure no other background tasks are running
+        return {
+            "ok": True,
+            "message": "Hub auto-sync already running",
+            "daemon": daemon_status(),
+        }
+
+    # One radio owner only
     if _handsfree_task and not _handsfree_task.done():
         await job_nipro_handsfree_stop()
     if _live_task and not _live_task.done():
@@ -1735,108 +1991,127 @@ async def job_daemon_start(*, duration_s: float = 28800.0) -> Dict[str, Any]:
     if _cycle_task and not _cycle_task.done():
         await job_cycle_stop()
 
-    _daemon_stop.clear()
-    _daemon_status.update({
-        "active": True,
-        "status": "running",
-        "message": "Unified Background Sync Daemon started",
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
-    })
+    from medical_ble_toolkit.hub import HubDaemon, load_hub_config
+    from medical_ble_toolkit.hub.policy import HUB_ONLY_PAIR_TIPS
+
+    cfg = load_hub_config()
+
+    def _on_status(st: Any) -> None:
+        d = st.as_dict() if hasattr(st, "as_dict") else {}
+        _daemon_status.update(
+            {
+                "active": bool(d.get("active")),
+                "status": d.get("phase") or d.get("status") or "running",
+                "phase": d.get("phase") or "",
+                "message": d.get("message") or "",
+                "updated_at": d.get("updated_at") or _daemon_now(),
+                "last_mac": d.get("last_mac") or "",
+                "last_brand": d.get("last_brand") or "",
+                "last_result": d.get("last_result") or "",
+                "last_stored": int(d.get("last_stored") or 0),
+                "last_reason": d.get("last_reason") or "",
+                "scan_round": int(d.get("scan_round") or 0),
+                "paired_count": int(d.get("paired_count") or 0),
+                "omron_next_s": d.get("omron_next_s"),
+                "config_omron_poll_s": d.get("config_omron_poll_s")
+                or cfg.omron_poll_interval_s,
+                "concurrent_active": int(d.get("concurrent_active") or 0),
+                "max_concurrent": int(
+                    d.get("max_concurrent")
+                    or getattr(cfg, "max_concurrent", 4)
+                    or 4
+                ),
+                "active_sessions": list(d.get("active_sessions") or []),
+            }
+        )
+        if d.get("last_mac"):
+            _push_dashboard(highlight_mac=d.get("last_mac") or "")
+
+    hub = HubDaemon(
+        get_roster=_hub_roster,
+        run_session=_hub_run_session,
+        config=cfg,
+        on_status=_on_status,
+        reload_config_each_round=True,
+        radio_lock=_ble_lock,  # share radio with UI Scan/Pair
+    )
+    _daemon_hub = hub
+
+    max_c = int(getattr(cfg, "max_concurrent", 4) or 4)
+    _daemon_status.update(
+        {
+            "active": True,
+            "status": "running",
+            "phase": "hunt",
+            "message": (
+                f"Hub ON — concurrent multi-connect (max {max_c}); "
+                f"Omron every {cfg.omron_poll_interval_s:.0f}s; pair on hub only"
+            ),
+            "updated_at": _daemon_now(),
+            "config_omron_poll_s": cfg.omron_poll_interval_s,
+            "last_mac": "",
+            "last_result": "",
+            "last_stored": 0,
+            "scan_round": 0,
+            "concurrent_active": 0,
+            "max_concurrent": max_c,
+            "active_sessions": [],
+        }
+    )
+    _push_dashboard(highlight_mac="")
 
     async def _runner() -> None:
-        import time as _time
-        from medical_ble_toolkit.ble_client import scan_devices
-        
-        session_end = _time.monotonic() + float(duration_s)
-        
         try:
-            while not _daemon_stop.is_set():
-                if _time.monotonic() > session_end:
-                    break
-                
-                # Load all paired devices from DB (dynamically picking up new pairs)
-                devices = db.list_devices()
-                paired = [d for d in devices if d.get("paired") or d.get("brand")]
-                if not paired:
-                    await asyncio.sleep(5.0)
-                    continue
-
-                # Scan briefly to catch episodic ads
-                try:
-                    scanned = await scan_devices(profile=None, timeout=5.0)
-                except Exception as exc:
-                    log.warning("Daemon scan error: %s", exc)
-                    await asyncio.sleep(3.0)
-                    continue
-
-                if _daemon_stop.is_set():
-                    break
-
-                for d in paired:
-                    mac = (d.get("mac") or "").upper()
-                    brand_id = (d.get("brand") or "").lower()
-                    model = d.get("model") or ""
-                    
-                    found = False
-                    for sd in scanned:
-                        smac = (getattr(sd, "address", "") or "").upper()
-                        sname = (getattr(sd, "name", None) or "").strip()
-                        if smac == mac or (sname and sname == (d.get("name") or "").strip()):
-                            found = True
-                            mac = smac  # Use the scanned MAC (useful if Windows resolves it differently)
-                            break
-
-                    if found:
-                        if brand_id == "masimo":
-                            if not _live_status.get("active"):
-                                _daemon_status["message"] = f"Streaming from {brand_id} {mac}..."
-                                _push_dashboard(highlight_mac=mac)
-                                await job_live_start(brand_id=brand_id, mac=mac, model=model, duration_s=duration_s, auto_reconnect=True)
-                        else:
-                            # Episodic device - trigger a quick sync dump
-                            _daemon_status["message"] = f"Syncing {brand_id} {mac}..."
-                            _push_dashboard(highlight_mac=mac)
-                            try:
-                                def _on_reading():
-                                    _push_dashboard(highlight_mac=mac)
-                                # Setting listen_s a bit longer to ensure stability over battery drain
-                                await job_sync(brand_id=brand_id, mac=mac, model=model, listen_s=45.0, on_reading_cb=_on_reading)
-                            except Exception as exc:
-                                log.warning("Daemon sync failed for %s: %s", mac, exc)
-
-                        _daemon_status["message"] = "Unified Background Sync Daemon scanning..."
-                        _push_dashboard(highlight_mac="")
-                        break # Only handle one device per scan chunk to prevent starvation
-
-            _daemon_status["status"] = "completed"
-            _daemon_status["message"] = "Daemon finished"
+            await hub.run(duration_s=duration_s)
+        except asyncio.CancelledError:
+            hub.request_stop()
+            _daemon_status["status"] = "stopped"
+            _daemon_status["phase"] = "stopped"
+            _daemon_status["message"] = "Hub auto-sync stopped"
+            raise
         except Exception as exc:
-            log.exception("Daemon failed")
+            log.exception("Hub daemon failed")
             _daemon_status["status"] = "error"
+            _daemon_status["phase"] = "error"
             _daemon_status["message"] = str(exc)
         finally:
             _daemon_status["active"] = False
-            _daemon_status["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            _daemon_status["updated_at"] = _daemon_now()
             _push_dashboard(highlight_mac="")
 
     _daemon_task = asyncio.create_task(_runner())
     return {
         "ok": True,
-        "message": f"Daemon started for {duration_s:.0f}s",
+        "message": (
+            f"Hub auto-sync ON — concurrent multi-connect "
+            f"(max {max_c} links); NBP/NT/MightySat on AD; "
+            f"Omron every {cfg.omron_poll_interval_s:.0f}s "
+            f"(edit hub_config.json)."
+        ),
+        "tips": list(HUB_ONLY_PAIR_TIPS),
         "daemon": daemon_status(),
+        "config_path": "hub_config.json",
     }
 
+
 async def job_daemon_stop() -> Dict[str, Any]:
-    global _daemon_task
-    _daemon_stop.set()
+    global _daemon_task, _daemon_hub
+    if _daemon_hub is not None:
+        try:
+            _daemon_hub.request_stop()
+        except Exception:
+            pass
     if _daemon_task and not _daemon_task.done():
         _daemon_task.cancel()
         try:
             await _daemon_task
         except (asyncio.CancelledError, Exception):
             pass
+    _daemon_task = None
+    _daemon_hub = None
     _daemon_status["active"] = False
     _daemon_status["status"] = "stopped"
-    _daemon_status["message"] = "Daemon stopped"
-    _daemon_status["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    _daemon_status["phase"] = "stopped"
+    _daemon_status["message"] = "Hub auto-sync OFF"
+    _daemon_status["updated_at"] = _daemon_now()
     return {"ok": True, "daemon": daemon_status()}

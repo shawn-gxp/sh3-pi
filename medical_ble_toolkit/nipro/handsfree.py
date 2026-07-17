@@ -19,7 +19,7 @@ from typing import Any, Callable, List, Optional, Set
 from bleak.exc import BleakError
 
 from ..ble_client import MedicalBleClient, _brief, scan_devices, setup_logging
-from ..common.winrt_errors import is_windows
+from ..common.winrt_errors import is_windows, os_pair_supported
 from ..profiles import get_profile
 from .registry import (
     check_pairing,
@@ -161,9 +161,10 @@ async def handsfree_wait(
 
             use_pair = pair_on_connect
             if use_pair is None:
-                use_pair = is_windows() and meter.profile_id in (
+                use_pair = os_pair_supported() and meter.profile_id in (
                     "nipro_nmbp",
                     "and_ua651",
+                    "nipro_nbp",
                 )
 
             find_to = (

@@ -17,25 +17,26 @@ from __future__ import annotations
 from typing import Dict
 
 # How long after a measure we keep hunting the device (Omron-like "still get data")
+# Field baseline: NBP / NT-100B ~1m05s after measure (margin for scan+connect)
 FIND_WINDOW_S: Dict[str, float] = {
-    "nipro_nbp": 120.0,  # cuff often still connectable briefly after reading
-    "nipro_nmbp": 120.0,
-    "nipro_nsm1": 90.0,
-    "nipro_nt100b": 150.0,  # user log: ~1–2 min BLE after measure
-    "nipro_cf": 120.0,
-    "mightysat": 90.0,  # need sensor on; window for re-appear only
-    "thermometer": 150.0,
+    "nipro_nbp": 70.0,
+    "nipro_nmbp": 70.0,
+    "nipro_nsm1": 70.0,
+    "nipro_nt100b": 70.0,
+    "nipro_cf": 70.0,
+    "mightysat": 90.0,  # only while measuring; reconnect budget
+    "thermometer": 70.0,
 }
 
 # Per-session receive / listen after link is up
 RECEIVE_S: Dict[str, float] = {
-    "nipro_nbp": 90.0,
-    "nipro_nmbp": 90.0,
+    "nipro_nbp": 65.0,
+    "nipro_nmbp": 65.0,
     "nipro_nsm1": 60.0,
-    "nipro_nt100b": 90.0,  # bulk TICD dump needs time
-    "nipro_cf": 90.0,
-    "mightysat": 120.0,  # live stream
-    "thermometer": 90.0,
+    "nipro_nt100b": 65.0,
+    "nipro_cf": 65.0,
+    "mightysat": 600.0,  # full live stream while finger on
+    "thermometer": 65.0,
 }
 
 # Quiet end after last indication (BP multi-record spacing)
@@ -49,9 +50,10 @@ QUIET_S: Dict[str, float] = {
     "thermometer": 3.0,
 }
 
-# NT-100B: how many TICD history slots to pull (Omron-like bulk)
-# Device holds ~30; pull all for offline-style support
-NT100B_HISTORY_MAX = 30
+# NT-100B TICD slots to pull after measure.
+# Hub needs *latest* fast (index 0). Full 30-slot dumps monopolize the radio
+# for ~25s and starve MightySat's short live window.
+NT100B_HISTORY_MAX = 1  # index 0 only (= latest). Raise for lab bulk dumps.
 
 # Connect retries during find window
 CONNECT_RETRIES_POST_MEASURE = 5

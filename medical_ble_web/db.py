@@ -20,6 +20,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
+def reset_db(path: Path = DB_PATH) -> None:
+    """Delete all rows (keep schema). Fresh hub start."""
+    init_db(path)
+    with connect(path) as conn:
+        conn.executescript(
+            """
+            DELETE FROM readings;
+            DELETE FROM sessions;
+            DELETE FROM devices;
+            DELETE FROM scan_cache;
+            """
+        )
+        try:
+            conn.execute("DELETE FROM sqlite_sequence")
+        except sqlite3.OperationalError:
+            pass
+
+
 def init_db(path: Path = DB_PATH) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with connect(path) as conn:
@@ -385,7 +403,12 @@ def list_readings(
 
 
 def latest_reading_for_device(device_id: int) -> Optional[Dict[str, Any]]:
-    """Newest clinical reading for one device (by measured_at, then id)."""
+    """
+    Newest clinical reading for one device (dashboard hero).
+
+    Prefer **created_at** (when the hub received it) so NT-100B / TICD device
+    clocks that lag wall time cannot keep an older HTP row "on top" forever.
+    """
     with connect() as conn:
         row = conn.execute(
             """
@@ -396,7 +419,7 @@ def latest_reading_for_device(device_id: int) -> Optional[Dict[str, Any]]:
             WHERE r.device_id = ?
               AND r.reading_type IN ('bp', 'spo2', 'temp', 'glucose')
             ORDER BY
-                COALESCE(r.measured_at, r.created_at) DESC,
+                r.created_at DESC,
                 r.id DESC
             LIMIT 1
             """,

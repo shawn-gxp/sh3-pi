@@ -28,7 +28,12 @@ from .ble_client import (
     setup_logging,
 )
 from .common.hexutil import ms_timestamp
-from .common.winrt_errors import is_windows
+from .common.winrt_errors import (
+    is_windows,
+    os_pair_supported,
+    pairing_ui_hint,
+    remove_bond_instructions,
+)
 from .profiles import DeviceProfile, get_profile, list_profiles
 
 log = logging.getLogger("medical_ble.interactive")
@@ -362,14 +367,14 @@ def _pick_action(brand: BrandChoice) -> str:
         print("  1 READ    = one-shot history download (short-press BT)")
         print("  2 LIVE    = app-style loop every 60s — auto-update latest")
         print("  3 PAIR    = first-time bond (cuff flashing P)")
-        print("  4 REPAIR  = remove Windows bond, then pair again")
+        print("  4 REPAIR  = remove OS bond, then pair again")
         print("  5 SCAN    = continuous nearby scan (60s interval)")
         print()
         opts = [
             ("read", "READ once — short-press BT (transfer mode)"),
             ("live", "LIVE MONITOR — sync every 60s, latest reading auto-updates"),
             ("pair", "PAIR once — cuff flashing P (first time on this PC)"),
-            ("repair", "RE-PAIR — remove Windows bond, then pair (flashing P)"),
+            ("repair", "RE-PAIR — remove OS bond, then pair (flashing P)"),
             ("scan", "SCAN continuous — refresh nearby list every 60s"),
             ("scan_once", "SCAN once — single 8s discovery"),
             ("quit", "Quit"),
@@ -379,15 +384,15 @@ def _pick_action(brand: BrandChoice) -> str:
     # All other brands: pairing is first-class (scan → pick MAC+name → OS bond)
     print()
     print(f"  {brand.label} actions:")
-    print("  1 PAIR    = scan nearby → pick MAC+name → Windows bond")
-    print("  2 REPAIR  = remove Windows bond, then pair again")
+    print("  1 PAIR    = scan nearby → pick MAC+name → OS bond")
+    print("  2 REPAIR  = remove OS bond, then pair again")
     print("  3 LIVE    = app-style loop every 60s")
     print("  4 CONNECT = one-shot connect + listen")
     print("  5 SCAN    = continuous nearby scan")
     print()
     opts = [
         ("pair", "PAIR once — scan surroundings, pick device MAC+name, bond"),
-        ("repair", "RE-PAIR — remove Windows bond, scan, then pair again"),
+        ("repair", "RE-PAIR — remove OS bond, scan, then pair again"),
         ("live", "LIVE MONITOR — connect/sync every 60s, latest auto-updates"),
         ("connect", "Connect once + listen (hex + parse)"),
         ("scan", "SCAN continuous — refresh nearby list every 60s"),
@@ -440,11 +445,9 @@ async def _scan_and_list_devices(
             profile = None
 
     print("  Scanning surroundings ~%.0fs — wake the device / put it in P mode…" % timeout)
-    if is_windows():
-        print(
-            "  Windows tip: if scan aborts, type the MAC — connect uses "
-            "direct address (no scanner)."
-        )
+    print(
+        "  Tip: if scan aborts, type the MAC — connect uses direct address (no scanner)."
+    )
     try:
         devices = await scan_devices(profile=profile, timeout=timeout)
     except Exception as exc:  # noqa: BLE001
@@ -566,10 +569,9 @@ async def _run_omron_pair(
     print(f"  OMRON PAIR  model={model}  address={address}")
     print("  Device chosen from scan (MAC above). Bond uses direct connect.")
     print("  Cuff: hold Bluetooth until flashing  P  / -P-  (or already bonded)")
-    if is_windows():
-        print("  Windows: ACCEPT pairing dialog if shown.")
-        if force_rebind:
-            print("  Will try to remove old Windows bond first.")
+    print(f"  {pairing_ui_hint()}")
+    if force_rebind:
+        print(f"  Will try to remove old OS bond first. ({remove_bond_instructions(address)})")
     print("=" * 60)
     print()
     _prompt("Press Enter to start pair (cuff near PC)", "")
@@ -586,19 +588,18 @@ async def _run_omron_pair(
         msg = str(exc).lower()
         print()
         print("── Pair failed ──")
-        print("  Windows said: Could not pair / FAILED  (or bond incomplete)")
+        print(f"  OS said: {type(exc).__name__}: {exc}")
         print()
         print("  Do this in order:")
         print("  1. Phone: open OMRON Connect → forget/unpair this cuff")
-        print("  2. Windows: Settings → Bluetooth & devices → remove Omron/BLESmart")
+        print(f"  2. {remove_bond_instructions(address)}")
         print("  3. Cuff: HOLD Bluetooth 3–5s until flashing  P  / -P-")
         print("  4. Here: choose RE-PAIR (not plain PAIR)")
-        print("  5. Accept any Windows pairing popup (check taskbar)")
+        print(f"  5. {pairing_ui_hint()}")
         print("  6. After OK: short-press BT → READ or LIVE")
         print()
         if "failed" in msg or "could not pair" in msg:
-            print("  Note: pair() failed in ~0.1s usually means stale bond or not in P mode.")
-            print("  Connect can still succeed without a good bond — that is normal on WinRT.")
+            print("  Note: pair() failed quickly usually means stale bond or not in P mode.")
         print("  If you paired successfully before on this PC, try READ first.")
         print("────────────────")
         return 1
@@ -646,13 +647,13 @@ async def _run_omron_read(address: str, model: str, output: str) -> int:
             print("  Bond / encrypted notify failed (FE4A up but CCCD denied):")
             print("  1. SHORT-press BT now (transfer mode — not flashing P)")
             print("  2. Retry READ immediately while cuff is awake")
-            print("  3. If still fails: Windows Bluetooth → remove this cuff")
+            print(f"  3. If still fails: {remove_bond_instructions(address)}")
             print("  4. Phone OMRON Connect → forget cuff (one host only)")
-            print("  5. Toolkit → RE-PAIR with cuff flashing P → accept popup")
+            print("  5. Toolkit → RE-PAIR with cuff flashing P → accept pairing prompt")
             print("  6. Then short-press BT → READ again")
-        elif "scanner" in msg or "watcher" in msg or "stopping" in msg or "aborted" in msg:
-            print("  Scanner/radio busy (WinRT STOPPING/ABORTED):")
-            print("  1. Quick Settings → Bluetooth Off → wait 3s → On")
+        elif "scanner" in msg or "watcher" in msg or "stopping" in msg or "aborted" in msg or "not ready" in msg:
+            print("  Scanner/radio busy:")
+            print("  1. Toggle Bluetooth Off → wait 3s → On  (or: bluetoothctl power off/on)")
             print("  2. Close other BLE apps; wait 2s; retry READ")
             print("  3. Toolkit will also try connect-by-MAC without scan")
         else:
@@ -688,8 +689,7 @@ async def _run_beurer(address: str, model: str) -> int:
         print(f"  adv_names={list(meta.advertisement_names)}")
     print("  Timing: settle → pair → DIS → set-time → CCCD → quiet-end")
     print("  (HealthManager Pro–aligned; OCR not used)")
-    if is_windows():
-        print("  Windows: accept pairing dialog if shown.")
+    print(f"  {pairing_ui_hint()}")
     print("=" * 60)
     print()
     _prompt("Press Enter to start (device advertising / ready)", "")
@@ -719,7 +719,7 @@ async def _run_beurer(address: str, model: str) -> int:
         f"dedup_drop={result.deduped_dropped}"
     )
     if result.passkey_hint and result.status.value.startswith("pair"):
-        print("  → Remove Windows bond, re-run, enter 6-digit code from LCD.")
+        print(f"  → {remove_bond_instructions(address)} Then re-run, enter 6-digit code from LCD.")
     for i, r in enumerate(result.readings[:20]):
         print(f"  [{i}] {_brief(r)}")
     return 0 if result.ok else 2
@@ -789,27 +789,23 @@ async def _run_generic_pair(
     print(f"  {label}  brand={brand.id}  model={model or brand.default_model}")
     print(f"  address={address}")
     print("  Device chosen from scan. Connecting + OS bond…")
-    if is_windows():
-        print("  Windows: ACCEPT pairing dialog if shown.")
-        if force_rebind:
-            print("  Will try to remove old Windows bond first.")
+    print(f"  {pairing_ui_hint()}")
+    if force_rebind:
+        print(f"  Will try to remove old OS bond first. ({remove_bond_instructions(address)})")
     print("=" * 60)
     print()
     _prompt("Press Enter to start pair (device advertising / near PC)", "")
 
-    if force_rebind and is_windows():
+    if force_rebind and os_pair_supported():
         try:
             from omron_bp.ble.connection import unpair_address
 
-            print("  Removing previous Windows bond (best effort)…")
+            print("  Removing previous OS bond (best effort)…")
             await unpair_address(address)
             await asyncio.sleep(1.0)
         except Exception as exc:  # noqa: BLE001
             log.warning("Unpair skip: %s — continue with pair", exc)
-            print(
-                "  Note: auto-unpair failed. Remove the device in "
-                "Settings → Bluetooth & devices if pair fails."
-            )
+            print(f"  Note: auto-unpair failed. {remove_bond_instructions(address)}")
 
     # Beurer has its own companion session (pair + protocol timing)
     if brand.id == "beurer":
@@ -823,7 +819,7 @@ async def _run_generic_pair(
     client = MedicalBleClient(
         address=address,
         profile=profile,
-        pair=is_windows(),
+        pair=os_pair_supported(),
         connect_retries=2,
         auto_dispatch=(brand.id in ("re", "fora")),
     )
@@ -847,9 +843,9 @@ async def _run_generic_pair(
         print()
         print("  Do this in order:")
         print("  1. Device: put in pairing / advertising mode")
-        print("  2. Windows: Settings → Bluetooth → remove this device if listed")
+        print(f"  2. {remove_bond_instructions(address)}")
         print("  3. Here: choose RE-PAIR (scan → pick MAC+name again)")
-        print("  4. Accept any Windows pairing popup (check taskbar)")
+        print(f"  4. {pairing_ui_hint()}")
         print("────────────────")
         return 1
 
@@ -877,7 +873,7 @@ async def _run_connect(
     client = MedicalBleClient(
         address=address,
         profile=profile,
-        pair=do_pair and is_windows(),
+        pair=do_pair and os_pair_supported(),
         connect_retries=2,
         auto_dispatch=(brand.id in ("re", "fora")),
     )
@@ -978,12 +974,11 @@ async def run_interactive() -> int:
                 # scan_once — original one-shot discovery
                 print()
                 print("  Scanning ~8s — wake the device…")
-                if is_windows():
-                    print(
-                        "  If WinRT aborts the scanner: toggle Bluetooth Off/On, "
-                        "close nRF Connect, wait 2s, retry — or skip scan and "
-                        "use known MAC on Connect/Pair/Read."
-                    )
+                print(
+                    "  If scanner aborts: toggle Bluetooth Off/On "
+                    "(or bluetoothctl power off/on), close other BLE apps, "
+                    "wait 2s, retry — or use known MAC on Connect/Pair/Read."
+                )
                 try:
                     devices = await scan_devices(profile=profile, timeout=8.0)
                 except Exception as exc:  # noqa: BLE001
