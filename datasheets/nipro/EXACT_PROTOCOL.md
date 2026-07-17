@@ -1,0 +1,349 @@
+# Nipro BLELib — exact protocol extract
+
+Auto-extracted from decompiled C# (ilspycmd 10.x).
+
+## CFL — match `NIPRO CF`
+
+Source: `decompiled_cs\BLELib\BLELib.BLEDevice\BLEDeviceCFL.cs`
+
+### Timeouts / ints
+
+- `PAIRING_REQUEST_TIMEOUT` = **30000**
+
+### Task.Delay values (ms): [1, 100]
+
+### UUID dictionaries
+
+**_UuidsS**
+
+| Label | UUID |
+|-------|------|
+| Glucose Meter Service | `5D87A4A0-E42D-11E5-BEEF-0002A5D5C51B` |
+| Glucose Meter Extension Service | `7A1A0001-8D7F-1727-A23F-DEDB5BF5DF46` |
+| Time and Alarm Setting Service | `87F60001-A469-1EF4-637F-78B96A6F358B` |
+| Device Information Service | `8E5996E0-E42F-11E5-AF97-0002A5D5C51B` |
+| Battery Service | `74D4C620-E431-11E5-B5F8-0002A5D5C51B` |
+
+**_Uuids1**
+
+| Label | UUID |
+|-------|------|
+| Glucose Measurement | `5D87A4A1-E42D-11E5-BEEF-0002A5D5C51B` |
+| Glucose Measurement Context | `5D87A4A2-E42D-11E5-BEEF-0002A5D5C51B` |
+| Record Access Control Point | `5D87A4A3-E42D-11E5-BEEF-0002A5D5C51B` |
+| Glucose Feature | `5D87A4A4-E42D-11E5-BEEF-0002A5D5C51B` |
+
+**_Uuids2**
+
+| Label | UUID |
+|-------|------|
+| Target Glucose Concentration | `7A1A0002-8D7F-1727-A23F-DEDB5BF5DF46` |
+| Remote Device Information | `7A1A0003-8D7F-1727-A23F-DEDB5BF5DF46` |
+| Fixed Message | `7A1A0005-8D7F-1727-A23F-DEDB5BF5DF46` |
+| Image Data Transfer | `7A1A0006-8D7F-1727-A23F-DEDB5BF5DF46` |
+| Transfer Access Control Point | `7A1A0007-8D7F-1727-A23F-DEDB5BF5DF46` |
+
+**_Uuids3**
+
+| Label | UUID |
+|-------|------|
+| Current Time | `87F60002-A469-1EF4-637F-78B96A6F358B` |
+
+**_Uuids4**
+
+| Label | UUID |
+|-------|------|
+| Manufacturer Name String | `8E5996E1-E42F-11E5-AF97-0002A5D5C51B` |
+| Model Number String | `8E5996E2-E42F-11E5-AF97-0002A5D5C51B` |
+| Serial Number String | `8E5996E3-E42F-11E5-AF97-0002A5D5C51B` |
+| Hardware Revision String | `8E5996E4-E42F-11E5-AF97-0002A5D5C51B` |
+| Firmware Revision String | `8E5996E5-E42F-11E5-AF97-0002A5D5C51B` |
+| Software Revision String | `8E5996E6-E42F-11E5-AF97-0002A5D5C51B` |
+
+### WriteAsync payloads (literal bytes near write)
+
+| Method | Hex | Line |
+|--------|-----|------|
+| `` | `04 01` | 521 |
+| `` | `01 01` | 585 |
+| `PairingAllRecieve` | `04 01` | 766 |
+| `PairingAllRecieve` | `01 01` | 781 |
+| `GetLastSEQNo` | `04 03 01 00 00` | 942 |
+
+---
+
+## MightySat — match `MightySat`
+
+Source: `decompiled_cs\BLELib\BLELib.BLEDevice\BLEDeviceMightySat.cs`
+
+### Timeouts / ints
+
+- `PULSE_SEARCH_BIT` = **64**
+
+### Task.Delay values (ms): [100]
+
+### String / UUID constants
+
+| Name | Value |
+|------|-------|
+| `SERVICE_UUID` | `54c21000-a720-4b4f-11e4-9fe20002a5d5` |
+| `INCOMING_UUID` | `54c21001-a720-4b4f-11e4-9fe20002a5d5` |
+| `GOINGOUT_UUID` | `54c21002-a720-4b4f-11e4-9fe20002a5d5` |
+
+### Byte command constants
+
+| Name | Dec | Hex |
+|------|-----|-----|
+| `GetDeviceInformation` | 1 | `0x01` |
+| `SetClock` | 2 | `0x02` |
+| `EnableStream` | 3 | `0x03` |
+| `Waveforms` | 4 | `0x04` |
+| `Parameters` | 5 | `0x05` |
+| `GetTrendRecord` | 6 | `0x06` |
+| `ClearallTrend` | 7 | `0x07` |
+| `Ack` | 254 | `0xFE` |
+| `Nack` | 255 | `0xFF` |
+| `SOM` | 119 | `0x77` |
+
+### Guid.Parse UUIDs used in code
+
+- `54c21000-a720-4b4f-11e4-9fe20002a5d5`
+- `54c21001-a720-4b4f-11e4-9fe20002a5d5`
+- `54c21002-a720-4b4f-11e4-9fe20002a5d5`
+
+---
+
+## NBCM — match `NBCM`
+
+Source: `decompiled_cs\BLELib\BLELib.BLEDevice\BLEDeviceNBCM.cs`
+
+### Task.Delay values (ms): [1000, 2000]
+
+### WriteAsync payloads (literal bytes near write)
+
+| Method | Hex | Line |
+|--------|-----|------|
+| `SetOperationMode` | `04 01 05 0A 00` | 704 |
+| `RegisterNewUser` | `01 E2 07` | 727 |
+| `UserNoAvailabilityCheck` | `03 01 14 12` | 753 |
+| `DeleteSettings` | `03 01 B0 00` | 770 |
+| `DeleteSettings` | `03 01 AF 00` | 778 |
+| `DeleteUser` | `04 01 14 13 00` | 803 |
+| `DeleteUser` | `03` | 827 |
+| `UserAuthentication` | `02 00 E2 07` | 858 |
+| `SetHeight` | `05 01 14 18 00 00` | 1022 |
+| `MeasurementResultDisplaySetting` | `04 01 05 20 01` | 1032 |
+| `BodyFatPercentageMeasurement` | `04 01 05 22 01` | 1044 |
+| `MedicalExaminationModeDisabled` | `04 01 05 28 00` | 1056 |
+| `AirplaneModeDisabled` | `04 01 05 2C 00` | 1068 |
+| `DeviceDisconnect` | `03 01 13 00` | 1092 |
+| `FreeColor` | `03 01 41 02` | 1166 |
+| `SetColor` | `04 01 41 00 00` | 1201 |
+
+### Guid.Parse UUIDs used in code
+
+- `00001805-0000-1000-8000-00805F9B34FB`
+- `0000180A-0000-1000-8000-00805F9B34FB`
+- `0000181B-0000-1000-8000-00805F9B34FB`
+- `0000181C-0000-1000-8000-00805F9B34FB`
+- `0000181D-0000-1000-8000-00805F9B34FB`
+- `00002A25-0000-1000-8000-00805F9B34FB`
+- `00002A2B-0000-1000-8000-00805F9B34FB`
+- `00002A85-0000-1000-8000-00805F9B34FB`
+- `00002A8A-0000-1000-8000-00805F9B34FB`
+- `00002A8C-0000-1000-8000-00805F9B34FB`
+- `00002A8E-0000-1000-8000-00805F9B34FB`
+- `00002A9C-0000-1000-8000-00805F9B34FB`
+- `00002A9D-0000-1000-8000-00805F9B34FB`
+- `00002A9F-0000-1000-8000-00805F9B34FB`
+- `11127000-B364-11E4-AB27-0800200C9A66`
+- `11127001-B364-11E4-AB27-0800200C9A66`
+- `11127002-B364-11E4-AB27-0800200C9A66`
+
+---
+
+## NBP1 — match `NBP-1BLE`
+
+Source: `decompiled_cs\BLELib\BLELib.BLEDevice\BLEDeviceNBP1.cs`
+
+### Timeouts / ints
+
+- `PAIRING_REQUEST_TIMEOUT` = **30000**
+
+### Task.Delay values (ms): [100, 1000]
+
+### String / UUID constants
+
+| Name | Value |
+|------|-------|
+| `SERVICE_UUID` | `0000180F-0000-1000-8000-00805F9B34FB` |
+| `BLOOD_PRESSURE_MEASUREMENT` | `00002A35-0000-1000-8000-00805F9B34FB` |
+| `DATE_TIME` | `00002A08-0000-1000-8000-00805F9B34FB` |
+| `SYSTEM_ID` | `00002A23-0000-1000-8000-00805F9B34FB` |
+| `MODEL_NUMBER` | `00002A24-0000-1000-8000-00805F9B34FB` |
+| `SERIAL_NUMBER` | `00002A25-0000-1000-8000-00805F9B34FB` |
+| `FIRMWARE_REVISION` | `00002A26-0000-1000-8000-00805F9B34FB` |
+| `HARDWARE_REVISION` | `00002A27-0000-1000-8000-00805F9B34FB` |
+| `SOFTWARE_REVISION` | `00002A28-0000-1000-8000-00805F9B34FB` |
+| `MANUFACTURE_NAME` | `00002A29-0000-1000-8000-00805F9B34FB` |
+| `REGISTRATION_CERTIFICATION_DATA` | `00002A2A-0000-1000-8000-00805F9B34FB` |
+| `BATTERY_LEVEL` | `00002A19-0000-1000-8000-00805F9B34FB` |
+| `COMMON_UUID_TAIL` | `-0000-1000-8000-00805F9B34FB` |
+| `PRIMARY_SERVICE_UUID` | `00001810-0000-1000-8000-00805F9B34FB` |
+
+### Guid.Parse UUIDs used in code
+
+- `0000180A-0000-1000-8000-00805F9B34FB`
+- `00001810-0000-1000-8000-00805F9B34FB`
+- `00002A08-0000-1000-8000-00805F9B34FB`
+- `00002A25-0000-1000-8000-00805F9B34FB`
+
+---
+
+## NSM1 — match `NSM-1BLE`
+
+Source: `decompiled_cs\BLELib\BLELib.BLEDevice\BLEDeviceNSM1.cs`
+
+### Timeouts / ints
+
+- `PAIRING_REQUEST_TIMEOUT` = **30000**
+
+### Task.Delay values (ms): [100, 1000]
+
+### String / UUID constants
+
+| Name | Value |
+|------|-------|
+| `SERVICE_UUID` | `233BF000-5A34-1B6D-975C-000D5690ABE4` |
+| `TEMPERATURE_MEASUREMENT` | `00002A1C-0000-1000-8000-00805F9B34FB` |
+| `TEMPERATURE_TYPE` | `00002A1D-0000-1000-8000-00805F9B34FB` |
+| `DATE_TIME` | `00002A08-0000-1000-8000-00805F9B34FB` |
+| `SYSTEM_ID` | `00002A23-0000-1000-8000-00805F9B34FB` |
+| `MODEL_NUMBER` | `00002A24-0000-1000-8000-00805F9B34FB` |
+| `SERIAL_NUMBER` | `00002A25-0000-1000-8000-00805F9B34FB` |
+| `FIRMWARE_REVISION` | `00002A26-0000-1000-8000-00805F9B34FB` |
+| `HARDWARE_REVISION` | `00002A27-0000-1000-8000-00805F9B34FB` |
+| `SOFTWARE_REVISION` | `00002A28-0000-1000-8000-00805F9B34FB` |
+| `MANUFACTURE_NAME` | `00002A29-0000-1000-8000-00805F9B34FB` |
+| `REGISTRATION_CERTIFICATION_DATA` | `00002A2A-0000-1000-8000-00805F9B34FB` |
+| `BATTERY_LEVEL` | `00002A19-0000-1000-8000-00805F9B34FB` |
+| `CUSTOM_CHARACTERISTIC` | `233BF001-5A34-1B6D-975C-000D5690ABE4` |
+| `COMMON_UUID_TAIL` | `-0000-1000-8000-00805F9B34FB` |
+| `PRIMARY_SERVICE_UUID` | `00001809-0000-1000-8000-00805F9B34FB` |
+
+### Static command byte arrays
+
+| Name | Hex |
+|------|-----|
+| `SET_TIME_AS_HEADER` | `08 01 01` |
+| `DISCONNECT` | `02 01 03` |
+| `READ_SET_TIME_AND_DATE` | `02 00 04` |
+| `UNPAIR` | `02 01 10` |
+| `DELETE_ALL_MEMORY` | `02 01 12` |
+| `SET_BUFFER_SIZE_AS_HEADER` | `03 01 A6` |
+| `SET_BUFFER_SIZE_AS_VALUE_FOR_NINETY` | `01` |
+| `READ_DEVICE_SETTINGS` | `02 00 DB` |
+| `REQUEST_TO_SEND_DATA_IN_BUFFER` | `02 00 E1` |
+
+### Guid.Parse UUIDs used in code
+
+- `00001809-0000-1000-8000-00805F9B34FB`
+- `0000180A-0000-1000-8000-00805F9B34FB`
+- `00002A08-0000-1000-8000-00805F9B34FB`
+- `00002A25-0000-1000-8000-00805F9B34FB`
+- `233BF000-5A34-1B6D-975C-000D5690ABE4`
+- `233BF001-5A34-1B6D-975C-000D5690ABE4`
+
+---
+
+## NT100B — match `NT-100B`
+
+Source: `decompiled_cs\BLELib\BLELib.BLEDevice\BLEDeviceNT100B.cs`
+
+### Timeouts / ints
+
+- `PAIRING_REQUEST_TIMEOUT` = **30000**
+
+### Task.Delay values (ms): [100, 1000]
+
+### String / UUID constants
+
+| Name | Value |
+|------|-------|
+| `SERVICE_UUID` | `00001523-1212-EFDE-1523-785FEABCD123` |
+| `TEMPERATURE_MEASUREMENT` | `00002A1C-0000-1000-8000-00805F9B34FB` |
+| `SYSTEM_ID` | `00002A23-0000-1000-8000-00805F9B34FB` |
+| `MODEL_NUMBER` | `00002A24-0000-1000-8000-00805F9B34FB` |
+| `SERIAL_NUMBER` | `00002A25-0000-1000-8000-00805F9B34FB` |
+| `FIRMWARE_REVISION` | `00002A26-0000-1000-8000-00805F9B34FB` |
+| `HARDWARE_REVISION` | `00002A27-0000-1000-8000-00805F9B34FB` |
+| `SOFTWARE_REVISION` | `00002A28-0000-1000-8000-00805F9B34FB` |
+| `MANUFACTURE_NAME` | `00002A29-0000-1000-8000-00805F9B34FB` |
+| `PnP_ID` | `00002A50-0000-1000-8000-00805F9B34FB` |
+| `REGISTRATION_CERTIFICATION_DATA` | `00002A2A-0000-1000-8000-00805F9B34FB` |
+| `WRITE_REQ` | `00001524-1212-EFDE-1523-785FEABCD123` |
+| `NOTIFICATION` | `00001524-1212-EFDE-1523-785FEABCD123` |
+| `COMMON_UUID_TAIL` | `-0000-1000-8000-00805F9B34FB` |
+| `PRIMARY_SERVICE_UUID` | `00001809-0000-1000-8000-00805F9B34FB` |
+
+### Byte command constants
+
+| Name | Dec | Hex |
+|------|-----|-----|
+| `ReadDeviceClockTime` | 35 | `0x23` |
+| `ReadDeviceModel` | 36 | `0x24` |
+| `ReadTheStorageDataWithIndexTime` | 37 | `0x25` |
+| `ReadTheStorageDataWithIndexResult` | 38 | `0x26` |
+| `ReadDeviceSerialNumber1` | 39 | `0x27` |
+| `ReadDeviceSerialNumber2` | 40 | `0x28` |
+| `ReadStorageNumberOfData` | 43 | `0x2B` |
+| `WriteSystemClockTime` | 51 | `0x33` |
+| `StartAnInfraRedTemperatureMeasurement` | 65 | `0x41` |
+| `TurnOffTheDevice` | 80 | `0x50` |
+| `ClearDeleteAllMemory` | 82 | `0x52` |
+| `NotificationForEnteringCommunicationMode` | 84 | `0x54` |
+
+### Guid.Parse UUIDs used in code
+
+- `00001523-1212-EFDE-1523-785FEABCD123`
+- `00001524-1212-EFDE-1523-785FEABCD123`
+
+---
+
+## UM212 — match `NMBP`
+
+Source: `decompiled_cs\BLELib\BLELib.BLEDevice\BLEDeviceUM212.cs`
+
+### Timeouts / ints
+
+- `PAIRING_REQUEST_TIMEOUT` = **30000**
+
+### Task.Delay values (ms): [100, 1000]
+
+### String / UUID constants
+
+| Name | Value |
+|------|-------|
+| `SERVICE_UUID` | `0000180F-0000-1000-8000-00805F9B34FB` |
+| `BLOOD_PRESSURE_MEASUREMENT` | `00002A35-0000-1000-8000-00805F9B34FB` |
+| `DATE_TIME` | `00002A08-0000-1000-8000-00805F9B34FB` |
+| `SYSTEM_ID` | `00002A23-0000-1000-8000-00805F9B34FB` |
+| `MODEL_NUMBER` | `00002A24-0000-1000-8000-00805F9B34FB` |
+| `SERIAL_NUMBER` | `00002A25-0000-1000-8000-00805F9B34FB` |
+| `FIRMWARE_REVISION` | `00002A26-0000-1000-8000-00805F9B34FB` |
+| `HARDWARE_REVISION` | `00002A27-0000-1000-8000-00805F9B34FB` |
+| `SOFTWARE_REVISION` | `00002A28-0000-1000-8000-00805F9B34FB` |
+| `MANUFACTURE_NAME` | `00002A29-0000-1000-8000-00805F9B34FB` |
+| `REGISTRATION_CERTIFICATION_DATA` | `00002A2A-0000-1000-8000-00805F9B34FB` |
+| `BATTERY_LEVEL` | `00002A19-0000-1000-8000-00805F9B34FB` |
+| `COMMON_UUID_TAIL` | `-0000-1000-8000-00805F9B34FB` |
+| `PRIMARY_SERVICE_UUID` | `00001810-0000-1000-8000-00805F9B34FB` |
+
+### Guid.Parse UUIDs used in code
+
+- `0000180A-0000-1000-8000-00805F9B34FB`
+- `00001810-0000-1000-8000-00805F9B34FB`
+- `00002A08-0000-1000-8000-00805F9B34FB`
+- `00002A25-0000-1000-8000-00805F9B34FB`
+
+---

@@ -4,8 +4,8 @@
 **Scope:** BLE connect, bond/pair, session timing, history/stream collect, parse to structured vitals.  
 **Out of scope:** cloud, accounts, charts, OCR/camera, clinical claims, full companion-app UI.
 
-**Last updated:** 2026-07-15  
-**Evidence:** datasheets, Beurer HealthManager Pro APK registry, Omron catalog, parsers/sessions in this repo.
+**Last updated:** 2026-07-16  
+**Evidence:** datasheets, Beurer HealthManager Pro APK registry, Omron catalog, Nipro げんきノート BLELib decompile, parsers/sessions in this repo.
 
 This is **not** a regulatory or “certified companion” claim.  
 **Companion-like** = hardware sync path close to the vendor app’s BLE behavior.
@@ -256,7 +256,35 @@ Full alias lists: `python -m omron_bp list-models` / catalog in `omron_bp/models
 
 | Model | Regions | Level | Notes |
 |-------|---------|-------|--------|
-| **UA-651BLE** | Global (no regional SKUs in repo) | **B** | SIG BLP + custom `0xF000`; Date Time within ~5s; cmd builders complete |
+| **UA-651BLE** | Global (no regional SKUs in repo) | **B** | Full SDK path (`and_ua651`): BLP + custom `0xA6`/`0xE1`. Prefer Nipro profiles for げんきノート meters |
+
+---
+
+## 3b. Nipro げんきノート companion-like (2026-07-16)
+
+Evidence: decompiled BLELib + NHL. Profiles in `profiles.py`.
+
+| Profile | Adv name | Level | Session (companion) |
+|---------|----------|-------|---------------------|
+| **nipro_nbp** | `NBP-1BLE*` | **B** | 1s settle → write `0x2A08` → indicate BLP `0x2A35` |
+| **nipro_nmbp** | `NMBP*` | **B** | Same + **bond** recommended (`--pair`) |
+| **nipro_nsm1** | `NSM-1BLE*` | **B** | 1s → HTS `0x2A08` → HTP `0x2A1C` |
+| **nipro_nt100b** | `NT-100B*` | **B** | HTP `0x2A1C` only; TICD power-off on disconnect |
+| **nipro_cf** | `NIPRO CF*` | **B** | Proprietary CF UUIDs + RACP All; Diff/seq later |
+| **thermometer** | (lab) | **C** | TICD full history poll (not default companion) |
+| **mightysat** | `MightySat*` | **B** | GetInfo → SetClock(ticks) → EnableStream(from info) |
+
+CLI aliases: `nt100b`, `nbp`, `nmbp`, `nsm1`, `cocoron`.
+
+**Pair registry + hands-free** (local `nipro_paired_devices.json`):
+
+```text
+python -m medical_ble_toolkit nipro pair -p nipro_nbp -a <MAC> --name "NBP-1BLE-…"
+python -m medical_ble_toolkit nipro list
+python -m medical_ble_toolkit nipro wait -t 3600
+```
+
+`wait` = companion ReceiveWait: exact name + CheckPairing(id) → 60s session → loop.
 
 ---
 
@@ -264,15 +292,16 @@ Full alias lists: `python -m omron_bp list-models` / catalog in `omron_bp/models
 
 | Model | Regions | Level | Notes |
 |-------|---------|-------|--------|
-| **MightySat** (consumer / RX) | Global | **B** | Proprietary frame `0x77` + CRC; stream + trends (CSD-1322B) |
+| **MightySat** (consumer / RX) | Global | **B** | Same as §3b mightysat; framed `0x77` + CRC |
 
 ---
 
-## 5. Non-contact thermometer (TICD / Nipro pack)
+## 5. Non-contact thermometer
 
-| Model | Regions | Level | Notes |
+| Model | Profile | Level | Notes |
 |-------|---------|-------|--------|
-| **NT-100B** | Global in this corpus | **B** | 8-byte frames; dual-wake + history poll |
+| **NT-100B** companion | `nipro_nt100b` | **B** | HTP indicate + power-off (げんきノート) |
+| **NT-100B** TICD history | `thermometer` | **C** | Lab dual-wake + 0x2B/0x25/0x26 |
 
 ---
 
@@ -295,8 +324,9 @@ Full alias lists: `python -m omron_bp list-models` / catalog in `omron_bp/models
 | Omron modern token | 1 proven + peers A-expected | — | — | — |
 | Omron classic + modern none | — | rest of catalog (~20 profiles) | — | — |
 | A&D UA-651BLE | — | 1 | — | — |
+| Nipro companion (NBP/NMBP/NSM/NT/CF) | — | 5 | — | — |
 | Masimo MightySat | — | 1 | — | — |
-| NT-100B | — | 1 | — | — |
+| NT-100B TICD lab | — | — | 1 | — |
 | FORA 6 | — | — | — | 1 |
 
 ---
@@ -308,7 +338,7 @@ Full alias lists: `python -m omron_bp list-models` / catalog in `omron_bp/models
 - Omron **HEM-7143T1** family (and regional aliases); other token FE4A models after one live QA.
 
 **Beta**
-- Beurer GL*, FT*, PO60; Omron classic / non-token modern; A&D UA-651BLE; Masimo MightySat; NT-100B; Beurer ECG for BP-only.
+- Beurer GL*, FT*, PO60; Omron classic / non-token modern; A&D UA-651BLE; Nipro げんきノート profiles (NBP/NMBP/NSM/NT/CF); Masimo MightySat; Beurer ECG for BP-only.
 
 **Experimental**
 - Beurer scales, trackers, DM20, ECG waveforms; FORA scaffold.

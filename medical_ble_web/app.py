@@ -34,8 +34,17 @@ import db  # noqa: E402
 from brands import get_brand, list_brands  # noqa: E402
 from ble_jobs import (  # noqa: E402
     BleJobError,
+    build_dashboard,
+    cycle_status,
+    handsfree_status,
+    job_cycle_start,
+    job_cycle_stop,
     job_live_start,
     job_live_stop,
+    job_nipro_handsfree_start,
+    job_nipro_handsfree_stop,
+    job_nipro_list,
+    job_nipro_register,
     job_pair,
     job_scan,
     job_sync,
@@ -91,6 +100,7 @@ class PairBody(BaseModel):
     brand: str
     mac: str
     model: str = ""
+    name: str = ""  # exact advertised BLE name (Nipro hands-free)
     repair: bool = False
 
 
@@ -98,7 +108,21 @@ class SyncBody(BaseModel):
     brand: str
     mac: str
     model: str = ""
-    listen_s: float = Field(30.0, ge=5.0, le=180.0)
+    listen_s: float = Field(60.0, ge=5.0, le=180.0)
+
+
+class NiproRegisterBody(BaseModel):
+    mac: str
+    name: str
+    brand: str = "nipro_nbp"
+    model: str = ""
+    serial: str = ""
+
+
+class NiproHandsfreeBody(BaseModel):
+    duration_s: float = Field(3600.0, ge=60.0, le=28800.0)
+    receive_timeout: float = Field(60.0, ge=15.0, le=180.0)
+    categories: str = "bp,ht,gl,spo2"
 
 
 class LiveBody(BaseModel):
@@ -108,6 +132,13 @@ class LiveBody(BaseModel):
     duration_s: float = Field(3600.0, ge=30.0, le=86400.0)
     auto_reconnect: bool = True
     max_reconnects: int = Field(30, ge=1, le=100)
+
+
+class CycleBody(BaseModel):
+    """Auto-cycle roster: spend slot_s on each device, all cards always shown."""
+    macs: Optional[List[str]] = None  # default = all saved clinical devices
+    slot_s: float = Field(30.0, ge=10.0, le=120.0)
+    rounds: int = Field(0, ge=0, le=100)  # 0 = infinite until stop
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +214,7 @@ async def pair(body: PairBody) -> Dict[str, Any]:
             brand_id=body.brand,
             mac=body.mac,
             model=body.model,
+            name=body.name,
             repair=body.repair,
         )
         return result
@@ -191,6 +223,59 @@ async def pair(body: PairBody) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         log.exception("pair failed")
         raise HTTPException(500, str(exc)) from exc
+
+
+@app.get("/nipro/meters")
+async def nipro_meters() -> Dict[str, Any]:
+    """Local Nipro companion registry (exact names for hands-free)."""
+    try:
+        return await job_nipro_list()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/nipro/register")
+async def nipro_register(body: NiproRegisterBody) -> Dict[str, Any]:
+    try:
+        return await job_nipro_register(
+            mac=body.mac,
+            name=body.name,
+            brand_id=body.brand,
+            model=body.model,
+            serial=body.serial,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/nipro/handsfree/start")
+async def nipro_handsfree_start(body: NiproHandsfreeBody) -> Dict[str, Any]:
+    cats = [c.strip() for c in (body.categories or "").split(",") if c.strip()]
+    try:
+        return await job_nipro_handsfree_start(
+            duration_s=body.duration_s,
+            receive_timeout=body.receive_timeout,
+            categories=cats or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        log.exception("handsfree start failed")
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/nipro/handsfree/stop")
+async def nipro_handsfree_stop() -> Dict[str, Any]:
+    return await job_nipro_handsfree_stop()
+
+
+@app.get("/nipro/handsfree/status")
+async def nipro_handsfree_status() -> Dict[str, Any]:
+    return {"ok": True, "handsfree": handsfree_status()}
 
 
 @app.post("/sync")
@@ -241,30 +326,92 @@ async def live_latest() -> Dict[str, Any]:
     return {"ok": True, "live": live_status()}
 
 
+@app.get("/dashboard")
+async def dashboard() -> Dict[str, Any]:
+    """All saved devices + latest vitals side-by-side (multi-device board)."""
+    return build_dashboard()
+
+
+@app.get("/cycle/status")
+async def get_cycle_status() -> Dict[str, Any]:
+    return {"ok": True, "cycle": cycle_status(), "dashboard": build_dashboard()}
+
+
+@app.post("/cycle/start")
+async def cycle_start(body: CycleBody) -> Dict[str, Any]:
+    try:
+        return await job_cycle_start(
+            macs=body.macs,
+            slot_s=body.slot_s,
+            rounds=body.rounds,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        log.exception("cycle start failed")
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/cycle/stop")
+async def cycle_stop() -> Dict[str, Any]:
+    return await job_cycle_stop()
+
+
 @app.websocket("/ws/live")
 async def ws_live(websocket: WebSocket) -> None:
     """
-    Real-time push of live vitals to the browser.
+    Real-time push: live SpO2 vitals + multi-device dashboard/cycle updates.
 
-    Server pushes a snapshot on every SpO2/PR packet, plus ~2 Hz keepalive ticks.
-    This is the primary live UI path (not polling).
+    Queue items are either a live status dict, or
+    ``{"type": "dashboard", "dashboard": {...}}``.
     """
     await websocket.accept()
     q = subscribe_live()
     log.info("WebSocket /ws/live client connected")
     try:
         await websocket.send_json(
-            {"ok": True, "live": live_status(), "event": "hello"}
+            {
+                "ok": True,
+                "event": "hello",
+                "live": live_status(),
+                "dashboard": build_dashboard(),
+            }
         )
         while True:
             try:
-                snap = await asyncio.wait_for(q.get(), timeout=0.45)
-                await websocket.send_json(
-                    {"ok": True, "live": snap, "event": "vital"}
-                )
+                item = await asyncio.wait_for(q.get(), timeout=0.5)
+                if isinstance(item, dict) and item.get("type") == "dashboard":
+                    await websocket.send_json(
+                        {
+                            "ok": True,
+                            "event": "dashboard",
+                            "dashboard": item.get("dashboard"),
+                            "live": live_status(),
+                        }
+                    )
+                else:
+                    await websocket.send_json(
+                        {
+                            "ok": True,
+                            "event": "vital",
+                            "live": item,
+                            "dashboard": build_dashboard(
+                                highlight_mac=(item or {}).get("mac") or ""
+                            )
+                            if isinstance(item, dict) and item.get("active")
+                            else None,
+                        }
+                    )
             except asyncio.TimeoutError:
                 await websocket.send_json(
-                    {"ok": True, "live": live_status(), "event": "tick"}
+                    {
+                        "ok": True,
+                        "event": "tick",
+                        "live": live_status(),
+                        "dashboard": build_dashboard()
+                        if cycle_status().get("active")
+                        else None,
+                    }
                 )
     except WebSocketDisconnect:
         log.info("WebSocket /ws/live client disconnected")

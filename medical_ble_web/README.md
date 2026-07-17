@@ -54,16 +54,27 @@ Opens: **http://127.0.0.1:8741**
 | POST | `/scan` | BLE scan `{ "brand": null, "timeout": 8 }` |
 | GET | `/devices` | Saved devices |
 | POST | `/devices` | Save device |
-| POST | `/pair` | Pair / re-pair |
-| POST | `/sync` | One-shot read/sync |
+| POST | `/pair` | Pair / re-pair (Nipro also writes hands-free registry) |
+| POST | `/sync` | One-shot read/sync (Nipro companion sessions) |
 | POST | `/live/start` | Start live stream |
 | POST | `/live/stop` | Stop live |
 | GET | `/live/latest` | Poll latest live reading |
 | GET | `/readings` | History from SQLite |
+| GET | `/nipro/meters` | Paired Nipro registry |
+| POST | `/nipro/register` | Register exact BLE name for hands-free |
+| POST | `/nipro/handsfree/start` | Companion-like wait loop |
+| POST | `/nipro/handsfree/stop` | Stop hands-free |
+| GET | `/nipro/handsfree/status` | Hands-free status |
 
 ## Brands
 
-Omron, Beurer, A&D, Masimo, NT-100B thermo, FORA, RE generic — same as CLI.
+Omron, Beurer, A&D (full SDK), **Nipro companion** (NBP / NMBP / NSM / NT-100B / CF), Masimo, NT-100B TICD lab, FORA, RE.
+
+### Nipro hands-free (げんきノート-style)
+
+1. Select a Nipro brand → Scan → set MAC (exact name from scan used on Pair).  
+2. **Pair** once (registers `nipro_paired_devices.json` + SQLite device).  
+3. Measure on the device → **Sync**, or click **Nipro Hands-free** to wait and auto-sync.
 
 ## Notes
 

@@ -1,0 +1,458 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectGuid>{CAD09CC8-A42D-4E71-83EF-5C40ECD3D62C}</ProjectGuid>
+    <ProjectTypeGuids>{786C830F-07A1-408B-BD7F-6EE04809D6DB};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <LangVersion>15.0</LangVersion>
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+    <AssemblyName>NHL</AssemblyName>
+    <TargetFrameworkIdentifier>.NETPortable</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>v4.6</TargetFrameworkVersion>
+    <TargetFrameworkProfile>Profile44</TargetFrameworkProfile>
+    <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == 'AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <OutputPath>bin\Debug\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <OutputPath>bin\Release\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Xamarin.Forms.Core">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Xamarin.Forms.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Caliburn.Micro.Platform.Xamarin.Forms">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Caliburn.Micro.Platform.Xamarin.Forms.dll</HintPath>
+    </Reference>
+    <Reference Include="Caliburn.Micro">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Caliburn.Micro.dll</HintPath>
+    </Reference>
+    <Reference Include="Xamarin.Forms.Xaml">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Xamarin.Forms.Xaml.dll</HintPath>
+    </Reference>
+    <Reference Include="C1.Xamarin.Forms.Grid">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\C1.Xamarin.Forms.Grid.dll</HintPath>
+    </Reference>
+    <Reference Include="C1.Xamarin.Forms.Chart">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\C1.Xamarin.Forms.Chart.dll</HintPath>
+    </Reference>
+    <Reference Include="ZXing.Net.Mobile.Forms">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\ZXing.Net.Mobile.Forms.dll</HintPath>
+    </Reference>
+    <Reference Include="zxing.portable">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\zxing.portable.dll</HintPath>
+    </Reference>
+    <Reference Include="ZXing.Net.Mobile.Core">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\ZXing.Net.Mobile.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="C1.Xamarin.Forms.Calendar">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\C1.Xamarin.Forms.Calendar.dll</HintPath>
+    </Reference>
+    <Reference Include="BLELib">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\BLELib.dll</HintPath>
+    </Reference>
+    <Reference Include="Plugin.ImageEdit.Abstractions">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Plugin.ImageEdit.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="PCLStorage.Abstractions">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\PCLStorage.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="Plugin.Media.Abstractions">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Plugin.Media.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="ExifLib">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\ExifLib.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="Microsoft.Azure.Mobile.Client">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Microsoft.Azure.Mobile.Client.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Azure.Mobile.Client.SQLiteStore">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Microsoft.Azure.Mobile.Client.SQLiteStore.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.IdentityModel.Clients.ActiveDirectory">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Microsoft.IdentityModel.Clients.ActiveDirectory.dll</HintPath>
+    </Reference>
+    <Reference Include="SQLite.Net">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\SQLite.Net.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="C1.Xamarin.Forms.Core">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\C1.Xamarin.Forms.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Plugin.Media">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Plugin.Media.dll</HintPath>
+    </Reference>
+    <Reference Include="BCrypt.Net">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\BCrypt.Net.dll</HintPath>
+    </Reference>
+    <Reference Include="Xamarin.Essentials">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Xamarin.Essentials.dll</HintPath>
+    </Reference>
+    <Reference Include="Plugin.ImageEdit">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Plugin.ImageEdit.dll</HintPath>
+    </Reference>
+    <Reference Include="PCLStorage">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\PCLStorage.dll</HintPath>
+    </Reference>
+    <Reference Include="AiForms.Effects">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\AiForms.Effects.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Core">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\System.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="System">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\System.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Xml">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\System.Xml.dll</HintPath>
+    </Reference>
+    <Reference Include="PCLStorage">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\PCLStorage.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.Serialization">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\System.Runtime.Serialization.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationConfig Include="NHL.dll.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="NHL.Common\Common.cs" />
+    <Compile Include="NHL.Common\MeterCategory.cs" />
+    <Compile Include="NHL.Common\VersionManager.cs" />
+    <Compile Include="NHL.Framework\Configuration.cs" />
+    <Compile Include="NHL.Framework\HttpClientErrorException.cs" />
+    <Compile Include="NHL.Framework\HttpErrorExceptionBase.cs" />
+    <Compile Include="NHL.Framework\HttpServerErrorException.cs" />
+    <Compile Include="NHL.Framework\HttpUnauthorizedErrorException.cs" />
+    <Compile Include="NHL.Framework\IRestClient.cs" />
+    <Compile Include="NHL.Framework\RestClient.cs" />
+    <Compile Include="NHL.Models.Entity\Measurement.cs" />
+    <Compile Include="NHL.Models.Support\ModelBase.cs" />
+    <Compile Include="NHL.Models.Types.Support\CodeNameEnumBase.cs" />
+    <Compile Include="NHL.Models.Types\ColorType.cs" />
+    <Compile Include="NHL.Models.Types\MeasurementType.cs" />
+    <Compile Include="NHL.Models.Types\ShareSettingType.cs" />
+    <Compile Include="NHL.Models\AppLogModel.cs" />
+    <Compile Include="NHL.Models\AuthenticatedUserModel.cs" />
+    <Compile Include="NHL.Models\AuthenticationModel.cs" />
+    <Compile Include="NHL.Models\AuthenticationRequestModel.cs" />
+    <Compile Include="NHL.Models\CarouselPhotographModel.cs" />
+    <Compile Include="NHL.Models\ChartSettingModel.cs" />
+    <Compile Include="NHL.Models\ColorInfoModel.cs" />
+    <Compile Include="NHL.Models\CompositionMeterChartDataModel.cs" />
+    <Compile Include="NHL.Models\DailyComments.cs" />
+    <Compile Include="NHL.Models\DisplayCompChartDataModel.cs" />
+    <Compile Include="NHL.Models\DisplayGluChartDataModel.cs" />
+    <Compile Include="NHL.Models\DisplaySphygChartDataModel.cs" />
+    <Compile Include="NHL.Models\DisplayStepChartDataModel.cs" />
+    <Compile Include="NHL.Models\DisplayTemperatureChartDataModel.cs" />
+    <Compile Include="NHL.Models\DotVisible.cs" />
+    <Compile Include="NHL.Models\GlucoseChartDataModel.cs" />
+    <Compile Include="NHL.Models\GlucoseTargetThresholdModel.cs" />
+    <Compile Include="NHL.Models\HospitalInfoResponseModel.cs" />
+    <Compile Include="NHL.Models\HospitalModel.cs" />
+    <Compile Include="NHL.Models\HospitalShareSettingModel.cs" />
+    <Compile Include="NHL.Models\IgUserHospitalShareItemModel.cs" />
+    <Compile Include="NHL.Models\IgUserModel.cs" />
+    <Compile Include="NHL.Models\IgUserPasswordModel.cs" />
+    <Compile Include="NHL.Models\IgUserRequestModel.cs" />
+    <Compile Include="NHL.Models\IgUserRestoreRequestModel.cs" />
+    <Compile Include="NHL.Models\LinkHospitalRequestModel.cs" />
+    <Compile Include="NHL.Models\LinkHospitalResultModel.cs" />
+    <Compile Include="NHL.Models\LogfileTransferModel.cs" />
+    <Compile Include="NHL.Models\LoginModel.cs" />
+    <Compile Include="NHL.Models\MeasurementResultModel.cs" />
+    <Compile Include="NHL.Models\MeterModel.cs" />
+    <Compile Include="NHL.Models\NoticeDetailRequestModel.cs" />
+    <Compile Include="NHL.Models\NoticeDetailResponseModel.cs" />
+    <Compile Include="NHL.Models\NoticeListRequestModel.cs" />
+    <Compile Include="NHL.Models\NoticeListResponseModel.cs" />
+    <Compile Include="NHL.Models\NoticeModel.cs" />
+    <Compile Include="NHL.Models\Photograph.cs" />
+    <Compile Include="NHL.Models\SelectedItemModel.cs" />
+    <Compile Include="NHL.Models\SettingModel.cs" />
+    <Compile Include="NHL.Models\SharerRegisterRequestModel.cs" />
+    <Compile Include="NHL.Models\SharerRegisterResponseModel.cs" />
+    <Compile Include="NHL.Models\SharerRegistrationModel.cs" />
+    <Compile Include="NHL.Models\SphygmomanometerChartDataModel.cs" />
+    <Compile Include="NHL.Models\StepChartDataModel.cs" />
+    <Compile Include="NHL.Models\TemperatureChartDataModel.cs" />
+    <Compile Include="NHL.Models\TimeZoneModel.cs" />
+    <Compile Include="NHL.Models\UpdateIgUserModel.cs" />
+    <Compile Include="NHL.Models\UpdateTimezoneModel.cs" />
+    <Compile Include="NHL.Models\UpdateTimezoneOtherModel.cs" />
+    <Compile Include="NHL.Models\VersionModel.cs" />
+    <Compile Include="NHL.Properties\Resources.cs" />
+    <Compile Include="NHL.Services.DependencyService\IApplicationSleepControlService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IAssemblyService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IAuthenticator.cs" />
+    <Compile Include="NHL.Services.DependencyService\IBLELibService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IBusyIndicator.cs" />
+    <Compile Include="NHL.Services.DependencyService\ICheckPermissionService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IClipBoard.cs" />
+    <Compile Include="NHL.Services.DependencyService\ICurrentOrientationService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IFileControlService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IIdentifierForVendorService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IImageService.cs" />
+    <Compile Include="NHL.Services.DependencyService\ILoggingService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IMailService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IMediaPlayerService.cs" />
+    <Compile Include="NHL.Services.DependencyService\INetworkService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IRequestBluetooth.cs" />
+    <Compile Include="NHL.Services.DependencyService\IRequestLocation.cs" />
+    <Compile Include="NHL.Services.DependencyService\ISnackBar.cs" />
+    <Compile Include="NHL.Services.DependencyService\ISQLite.cs" />
+    <Compile Include="NHL.Services.DependencyService\IThreadInformationService.cs" />
+    <Compile Include="NHL.Services.DependencyService\IWebBrowserService.cs" />
+    <Compile Include="NHL.Services.Impl\AuthenticatedUserService.cs" />
+    <Compile Include="NHL.Services.Impl\AuthenticationService.cs" />
+    <Compile Include="NHL.Services.Impl\DailyCommentService.cs" />
+    <Compile Include="NHL.Services.Impl\HospitalInfoService.cs" />
+    <Compile Include="NHL.Services.Impl\IgUserService.cs" />
+    <Compile Include="NHL.Services.Impl\LinkHospitalService.cs" />
+    <Compile Include="NHL.Services.Impl\LogfileTransferService.cs" />
+    <Compile Include="NHL.Services.Impl\MeasurementService.cs" />
+    <Compile Include="NHL.Services.Impl\NoticeService.cs" />
+    <Compile Include="NHL.Services.Impl\PhotographService.cs" />
+    <Compile Include="NHL.Services.Impl\SharerRegisterService.cs" />
+    <Compile Include="NHL.Services.Impl\SharerUpdateService.cs" />
+    <Compile Include="NHL.Services.Impl\UnlinkHospitalService.cs" />
+    <Compile Include="NHL.Services.Impl\UpdateIgGlucoseTargetService.cs" />
+    <Compile Include="NHL.Services.Impl\UpdateIgPasswordService.cs" />
+    <Compile Include="NHL.Services.Impl\UpdateIgUserService.cs" />
+    <Compile Include="NHL.Services.Impl\UpdateTimezoneOtherService.cs" />
+    <Compile Include="NHL.Services.Impl\UpdateTimezoneService.cs" />
+    <Compile Include="NHL.Services.Impl\VersionService.cs" />
+    <Compile Include="NHL.Services.Support\ISyncServiceBase.cs" />
+    <Compile Include="NHL.Services.Support\IUseTokenService.cs" />
+    <Compile Include="NHL.Services.Support\ServiceProxyBase.cs" />
+    <Compile Include="NHL.Services.Support\SyncManager.cs" />
+    <Compile Include="NHL.Services.Support\SyncServiceBase.cs" />
+    <Compile Include="NHL.Services\DialogProvider.cs" />
+    <Compile Include="NHL.Services\IAuthenticatedUserService.cs" />
+    <Compile Include="NHL.Services\IAuthenticationService.cs" />
+    <Compile Include="NHL.Services\IDailyCommentService.cs" />
+    <Compile Include="NHL.Services\IDialogProvider.cs" />
+    <Compile Include="NHL.Services\IHospitalInfoService.cs" />
+    <Compile Include="NHL.Services\IIgUserService.cs" />
+    <Compile Include="NHL.Services\ILinkHospitalService.cs" />
+    <Compile Include="NHL.Services\ILogfileTransferService.cs" />
+    <Compile Include="NHL.Services\IMeasurementService.cs" />
+    <Compile Include="NHL.Services\INoticeService.cs" />
+    <Compile Include="NHL.Services\IPhotographService.cs" />
+    <Compile Include="NHL.Services\ISharerRegisterService.cs" />
+    <Compile Include="NHL.Services\ISharerUpdateService.cs" />
+    <Compile Include="NHL.Services\IUnlinkHospitalService.cs" />
+    <Compile Include="NHL.Services\IUpdateIgGlucoseTargetService.cs" />
+    <Compile Include="NHL.Services\IUpdateIgPasswordService.cs" />
+    <Compile Include="NHL.Services\IUpdateIgUserService.cs" />
+    <Compile Include="NHL.Services\IUpdateTimezoneOtherService.cs" />
+    <Compile Include="NHL.Services\IUpdateTimezoneService.cs" />
+    <Compile Include="NHL.Services\IUserManager.cs" />
+    <Compile Include="NHL.Services\IVersionService.cs" />
+    <Compile Include="NHL.Services\UserManager.cs" />
+    <Compile Include="NHL.ViewModels.Contexts\ChartContext.cs" />
+    <Compile Include="NHL.ViewModels.Contexts\MeasurementContext.cs" />
+    <Compile Include="NHL.ViewModels.Contexts\MeterContext.cs" />
+    <Compile Include="NHL.ViewModels.Event\CentralManagerEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\DeletePhotographEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\GlucoseTargetThresholdChanged.cs" />
+    <Compile Include="NHL.ViewModels.Event\HomeDeletePhotographEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\HomeMasterDetailRootOnActivateEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\HomeRegistDateSaveEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\HomeSelectPhotographEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\HomeUpdateMeasurementEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\HospitalScannedEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\LifecycleEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\LocationRequestEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\MasterDetailRootOnActivateEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\MenuNavigatedEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\PhotographingEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\PresentedMenuEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\RegistDateSaveEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\ScanControlEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\SelectedDateEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\SelectImageEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\SelectPhotographEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\ShowVersionUpMessageEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\TabChangeEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\UpdateMeasurementEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\UpdateTimezoneOtherRangeEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\UpdateTimezoneRangeEvent.cs" />
+    <Compile Include="NHL.ViewModels.Event\VersionEvent.cs" />
+    <Compile Include="NHL.ViewModels.Support\ReceiveItem.cs" />
+    <Compile Include="NHL.ViewModels.Support\ViewModelBase.cs" />
+    <Compile Include="NHL.ViewModels.Utils\Constants.cs" />
+    <Compile Include="NHL.ViewModels.Utils\DateTimeUtils.cs" />
+    <Compile Include="NHL.ViewModels.Utils\FormatUtils.cs" />
+    <Compile Include="NHL.ViewModels.Utils\IEnumerableUtil.cs" />
+    <Compile Include="NHL.ViewModels.Utils\IsolatedStorageUtils.cs" />
+    <Compile Include="NHL.ViewModels.Utils\JsonUtils.cs" />
+    <Compile Include="NHL.ViewModels.Utils\MeterSetting.cs" />
+    <Compile Include="NHL.ViewModels.Utils\MeterSettingFiles.cs" />
+    <Compile Include="NHL.ViewModels.Utils\PropertyDictionaryKey.cs" />
+    <Compile Include="NHL.ViewModels\BackupCodeDisplayViewModel.cs" />
+    <Compile Include="NHL.ViewModels\BodyCompositionMeasurementViewModel.cs" />
+    <Compile Include="NHL.ViewModels\ChangeTimeZoneViewModel.cs" />
+    <Compile Include="NHL.ViewModels\ChartCalendarViewModel.cs" />
+    <Compile Include="NHL.ViewModels\ChartSettingViewModel.cs" />
+    <Compile Include="NHL.ViewModels\ColorSelectionViewModel.cs" />
+    <Compile Include="NHL.ViewModels\CompositionMeterChartViewModel.cs" />
+    <Compile Include="NHL.ViewModels\CompositionMeterDataViewModel.cs" />
+    <Compile Include="NHL.ViewModels\CompositionMeterDetailViewModel.cs" />
+    <Compile Include="NHL.ViewModels\ContactUsViewModel.cs" />
+    <Compile Include="NHL.ViewModels\EditDailyCommentViewModel.cs" />
+    <Compile Include="NHL.ViewModels\FirstMeterSelectViewModel.cs" />
+    <Compile Include="NHL.ViewModels\GlucoseChartViewModel.cs" />
+    <Compile Include="NHL.ViewModels\GlucoseDataViewModel.cs" />
+    <Compile Include="NHL.ViewModels\GlucoseTargetRegistViewModel.cs" />
+    <Compile Include="NHL.ViewModels\GlucoseTargetUpdateViewModel.cs" />
+    <Compile Include="NHL.ViewModels\HomeImageTimezoneChangeViewModel.cs" />
+    <Compile Include="NHL.ViewModels\HomeViewModel.cs" />
+    <Compile Include="NHL.ViewModels\HospitalDetailViewModel.cs" />
+    <Compile Include="NHL.ViewModels\HospitalRegistrationViewModel.cs" />
+    <Compile Include="NHL.ViewModels\ImageTimezoneChangeViewModel.cs" />
+    <Compile Include="NHL.ViewModels\InformationViewModel.cs" />
+    <Compile Include="NHL.ViewModels\LogViewModel.cs" />
+    <Compile Include="NHL.ViewModels\ManualDataSyncViewModel.cs" />
+    <Compile Include="NHL.ViewModels\MasterDetailRootViewModel.cs" />
+    <Compile Include="NHL.ViewModels\MeasurementCalendarViewModel.cs" />
+    <Compile Include="NHL.ViewModels\MeasurementResultViewModel.cs" />
+    <Compile Include="NHL.ViewModels\MeterDetailViewModel.cs" />
+    <Compile Include="NHL.ViewModels\MeterScanViewModel.cs" />
+    <Compile Include="NHL.ViewModels\MeterViewModel.cs" />
+    <Compile Include="NHL.ViewModels\NoticeDetailViewModel.cs" />
+    <Compile Include="NHL.ViewModels\NoticeListViewModel.cs" />
+    <Compile Include="NHL.ViewModels\PhotoViewModelBase.cs" />
+    <Compile Include="NHL.ViewModels\PickPhotoViewModel.cs" />
+    <Compile Include="NHL.ViewModels\RecordEditViewModel.cs" />
+    <Compile Include="NHL.ViewModels\RecordViewModel.cs" />
+    <Compile Include="NHL.ViewModels\RestoreViewModel.cs" />
+    <Compile Include="NHL.ViewModels\SettingViewModel.cs" />
+    <Compile Include="NHL.ViewModels\SetupViewModel.cs" />
+    <Compile Include="NHL.ViewModels\SharerInformationViewModel.cs" />
+    <Compile Include="NHL.ViewModels\SharerIntroductionViewModel.cs" />
+    <Compile Include="NHL.ViewModels\SharerRegisterViewModel.cs" />
+    <Compile Include="NHL.ViewModels\SphygmomanometerChartViewModel.cs" />
+    <Compile Include="NHL.ViewModels\SphygmomanometerDataViewModel.cs" />
+    <Compile Include="NHL.ViewModels\StepChartViewModel.cs" />
+    <Compile Include="NHL.ViewModels\StepDataViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TakePhotoViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TemperatureChartViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TemperatureDataViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TermsOfServiceViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TimeZoneOtherRegistrationViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TimeZoneOtherUpdateViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TimeZoneRegistViewModel.cs" />
+    <Compile Include="NHL.ViewModels\TimeZoneUpdateViewModel.cs" />
+    <Compile Include="NHL.ViewModels\UnregisterHospitalViewModel.cs" />
+    <Compile Include="NHL.ViewModels\UserInfoRegistViewModel.cs" />
+    <Compile Include="NHL.ViewModels\UserInfoUpdateViewModel.cs" />
+    <Compile Include="NHL.Views.Behaviors.Support\CallMethodBehaviorBase.cs" />
+    <Compile Include="NHL.Views.Behaviors\CallMethodByTapBehavior.cs" />
+    <Compile Include="NHL.Views.Controls\NHLToolbarItem.cs" />
+    <Compile Include="NHL.Views.Converters\Base64ToImageSourceConverter.cs" />
+    <Compile Include="NHL.Views.Converters\BirthDayToBisibleConverter.cs" />
+    <Compile Include="NHL.Views.Converters\BooleanSwitchConverter.cs" />
+    <Compile Include="NHL.Views.Converters\GlucoseTargetThresholdToBisibleConverter.cs" />
+    <Compile Include="NHL.Views.Converters\PresentedMenuOpenColorConverter.cs" />
+    <Compile Include="NHL.Views.Effect\FixedFontSizeButtonEffect.cs" />
+    <Compile Include="NHL.Views.Effect\FixedFontSizeLabelEffect.cs" />
+    <Compile Include="NHL.Views.Effect\FixedFontSizeTextBoxEffect.cs" />
+    <Compile Include="NHL.Views.Effect\FlatEntryEffect.cs" />
+    <Compile Include="NHL.Views.Effect\FlatPickerEffect.cs" />
+    <Compile Include="NHL.Views.Effect\UnderlineEffect.cs" />
+    <Compile Include="NHL.Views.Extension\ImageResourceExtension.cs" />
+    <Compile Include="NHL.Views.Renderer\BottomBarPage.cs" />
+    <Compile Include="NHL.Views.Renderer\BottomBarPageExtensions.cs" />
+    <Compile Include="NHL.Views.Renderer\DatePickerView.cs" />
+    <Compile Include="NHL.Views.Renderer\ExtendedButton.cs" />
+    <Compile Include="NHL.Views.Renderer\HeightPickerView.cs" />
+    <Compile Include="NHL.Views.Renderer\PickerView.cs" />
+    <Compile Include="NHL.Views.Renderer\RadiusBoxView.cs" />
+    <Compile Include="NHL.Views.Renderer\TimeZoneOtherPicker.cs" />
+    <Compile Include="NHL.Views.Renderer\TimeZonePicker.cs" />
+    <Compile Include="NHL.Views\BackupCodeDisplayView.cs" />
+    <Compile Include="NHL.Views\BodyCompositionMeasurementView.cs" />
+    <Compile Include="NHL.Views\ChangeTimeZoneView.cs" />
+    <Compile Include="NHL.Views\ChartCalendarView.cs" />
+    <Compile Include="NHL.Views\ChartSettingView.cs" />
+    <Compile Include="NHL.Views\ColorSelectionView.cs" />
+    <Compile Include="NHL.Views\CompositionMeterChartView.cs" />
+    <Compile Include="NHL.Views\CompositionMeterDataView.cs" />
+    <Compile Include="NHL.Views\CompositionMeterDetailView.cs" />
+    <Compile Include="NHL.Views\ContactUsView.cs" />
+    <Compile Include="NHL.Views\EditDailyCommentView.cs" />
+    <Compile Include="NHL.Views\FirstMeterSelectView.cs" />
+    <Compile Include="NHL.Views\GlucoseChartView.cs" />
+    <Compile Include="NHL.Views\GlucoseDataView.cs" />
+    <Compile Include="NHL.Views\GlucoseTargetRegistView.cs" />
+    <Compile Include="NHL.Views\GlucoseTargetUpdateView.cs" />
+    <Compile Include="NHL.Views\HomeImageTimezoneChangeView.cs" />
+    <Compile Include="NHL.Views\HomeView.cs" />
+    <Compile Include="NHL.Views\HospitalDetailView.cs" />
+    <Compile Include="NHL.Views\HospitalRegistrationView.cs" />
+    <Compile Include="NHL.Views\ImageTimezoneChangeView.cs" />
+    <Compile Include="NHL.Views\InformationView.cs" />
+    <Compile Include="NHL.Views\LogView.cs" />
+    <Compile Include="NHL.Views\ManualDataSyncView.cs" />
+    <Compile Include="NHL.Views\MasterDetailRootView.cs" />
+    <Compile Include="NHL.Views\MeasurementCalendarView.cs" />
+    <Compile Include="NHL.Views\MeasurementResultView.cs" />
+    <Compile Include="NHL.Views\MeterDetailView.cs" />
+    <Compile Include="NHL.Views\MeterScanView.cs" />
+    <Compile Include="NHL.Views\MeterView.cs" />
+    <Compile Include="NHL.Views\NoticeDetailView.cs" />
+    <Compile Include="NHL.Views\NoticeListView.cs" />
+    <Compile Include="NHL.Views\PickPhotoView.cs" />
+    <Compile Include="NHL.Views\RecordEditView.cs" />
+    <Compile Include="NHL.Views\RecordView.cs" />
+    <Compile Include="NHL.Views\RestoreView.cs" />
+    <Compile Include="NHL.Views\SettingView.cs" />
+    <Compile Include="NHL.Views\SetupView.cs" />
+    <Compile Include="NHL.Views\SharerInformationView.cs" />
+    <Compile Include="NHL.Views\SharerIntroductionView.cs" />
+    <Compile Include="NHL.Views\SharerRegisterView.cs" />
+    <Compile Include="NHL.Views\SphygmomanometerChartView.cs" />
+    <Compile Include="NHL.Views\SphygmomanometerDataView.cs" />
+    <Compile Include="NHL.Views\StepChartView.cs" />
+    <Compile Include="NHL.Views\StepDataView.cs" />
+    <Compile Include="NHL.Views\TakePhotoView.cs" />
+    <Compile Include="NHL.Views\TemperatureChartView.cs" />
+    <Compile Include="NHL.Views\TemperatureDataView.cs" />
+    <Compile Include="NHL.Views\TermsOfServiceView.cs" />
+    <Compile Include="NHL.Views\TimeZoneOtherRegistrationView.cs" />
+    <Compile Include="NHL.Views\TimeZoneOtherUpdateView.cs" />
+    <Compile Include="NHL.Views\TimeZoneRegistView.cs" />
+    <Compile Include="NHL.Views\TimeZoneUpdateView.cs" />
+    <Compile Include="NHL.Views\UnregisterHospitalView.cs" />
+    <Compile Include="NHL.Views\UserInfoRegistView.cs" />
+    <Compile Include="NHL.Views\UserInfoUpdateView.cs" />
+    <Compile Include="NHL\App.cs" />
+    <Compile Include="NHL\License.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="NHL.Properties.Resources.resx" LogicalName="NHL.Properties.Resources.resources" />
+    <EmbeddedResource Include="NHL.Resources.Images.Reception.png" LogicalName="NHL.Resources.Images.Reception.png" />
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\Portable\$(TargetFrameworkVersion)\Microsoft.Portable.CSharp.targets" />
+</Project>

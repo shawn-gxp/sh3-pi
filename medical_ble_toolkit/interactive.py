@@ -77,25 +77,35 @@ BRANDS: List[BrandChoice] = [
     ),
     BrandChoice(
         id="and",
-        label="A&D UA-651BLE (Nipro / SIG BLP)",
+        label="A&D UA-651BLE full SDK (not げんきノート-simple)",
         connect_profile="and_ua651",
         default_model="UA-651BLE",
-        notes="Bond + indicate; measure then wait for history dump.",
+        notes="Custom 0xA6/0xE1 path. For Nipro companion meters use brand 'nipro'.",
+    ),
+    BrandChoice(
+        id="nipro",
+        label="Nipro げんきノート (NBP / NMBP / NSM / NT-100B / CF)",
+        connect_profile="nipro_nbp",
+        default_model="NBP-1BLE",
+        notes=(
+            "Companion-like sessions. Pair registry: "
+            "python -m medical_ble_toolkit nipro pair|list|wait"
+        ),
     ),
     BrandChoice(
         id="masimo",
         label="Masimo MightySat (SpO2 stream)",
         connect_profile="mightysat",
         default_model="MightySat",
-        notes="Streaming SpO2/PR/PI after connect.",
+        notes="Companion order: GetInfo → SetClock(ticks) → EnableStream.",
     ),
     BrandChoice(
         id="thermo",
-        label="NT-100B non-contact thermometer",
-        connect_profile="thermometer",
+        label="NT-100B companion (HTP + power-off)",
+        connect_profile="nipro_nt100b",
         default_model="NT-100B",
-        notes="Framed serial-over-BLE commands.",
-    ),
+        notes="げんきノート path. TICD history lab: profile thermometer.",
+    )
     BrandChoice(
         id="fora",
         label="FORA 6 Connect (RE scaffold)",

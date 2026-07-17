@@ -1,0 +1,669 @@
+{
+  "meta": {
+    "source": "decompiled_cs from BLELib.dll / NHL.dll",
+    "ilspycmd": "10.1.1"
+  },
+  "global": {
+    "default_scan_mode": 2,
+    "nhl_name_prefixes": {
+      "FILTERING_DATE_FORMAT": "yyyyMMdd",
+      "RECEIVED_RESULT_DEBUG_FILE": "NHL_DEBUG.txt",
+      "LOGIN_INFO_FILE": "login.txt",
+      "MENU_TITLE": "\u30e1\u30cb\u30e5\u30fc",
+      "MENU_CANCEL": "\u30ad\u30e3\u30f3\u30bb\u30eb",
+      "MENU_BUTTON_COPY": "\u30b3\u30d4\u30fc",
+      "NIPRO_CF_PREFIX": "NIPRO CF",
+      "NSM_PREFIX": "NSM-1BLE",
+      "NT_100B_PREFIX": "NT-100B",
+      "NBP_PREFIX": "NBP-1BLE",
+      "NBCM_PREFIX": "NBCM",
+      "NO_DATA_HYPHEN": "--",
+      "REQUIRED": " *\u5fc5\u9808"
+    },
+    "gatt_shared_constants": {
+      "SERVICE_UUID": "11127000-B364-11E4-AB27-0800200C9A66",
+      "SYSTEM_ID": "00002A23-0000-1000-8000-00805F9B34FB",
+      "MODEL_NUMBER": "00002A24-0000-1000-8000-00805F9B34FB",
+      "SERIAL_NUMBER": "00002A25-0000-1000-8000-00805F9B34FB",
+      "FIRMWARE_REVISION": "00002A26-0000-1000-8000-00805F9B34FB",
+      "HARDWARE_REVISION": "00002A27-0000-1000-8000-00805F9B34FB",
+      "SOFTWARE_REVISION": "00002A28-0000-1000-8000-00805F9B34FB",
+      "MANUFACTURE_NAME": "00002A29-0000-1000-8000-00805F9B34FB",
+      "REGISTRATION_CERTIFICATION_DATA": "00002A2A-0000-1000-8000-00805F9B34FB",
+      "BATTERY_LEVEL": "00002A19-0000-1000-8000-00805F9B34FB",
+      "WEIGHT_SCALE_MEASUREMENT": "00002A9D-0000-1000-8000-00805F9B34FB",
+      "WEIGHT_SCALE_FEATURE": "00002A9E-0000-1000-8000-00805F9B34FB",
+      "BODY_COMPOSITION_MEASUREMENT": "00002A9C-0000-1000-8000-00805F9B34FB",
+      "BODY_COMPOSITION_FEATURE": "0000292B-0000-1000-8000-00805F9B34FB",
+      "CURRENT_TIME": "00002A2B-0000-1000-8000-00805F9B34FB",
+      "LOCAL_TIME_INFORMATION": "00002A0F-0000-1000-8000-00805F9B34FB",
+      "USER_CONTROL_POINT": "00002A9F-0000-1000-8000-00805F9B34FB",
+      "FIRST_NAME": "00002A8A-0000-1000-8000-00805F9B34FB",
+      "LAST_NAME": "00002A90-0000-1000-8000-00805F9B34FB",
+      "E_MAIL": "00002A87-0000-1000-8000-00805F9B34FB",
+      "BIRTHDAY": "00002A85-0000-1000-8000-00805F9B34FB",
+      "SEX": "00002A8C-0000-1000-8000-00805F9B34FB",
+      "HEIGHT": "00002A8E-0000-1000-8000-00805F9B34FB",
+      "WRITE_REQ": "11127001-B364-11E4-AB27-0800200C9A66",
+      "NOTIFICATION": "11127002-B364-11E4-AB27-0800200C9A66",
+      "COMMON_UUID_TAIL": "-0000-1000-8000-00805F9B34FB",
+      "CCCD_UUID": "00002902-0000-1000-8000-00805f9b34fb"
+    },
+    "blelib_scan_timeout_is_caller_arg": true
+  },
+  "devices": {
+    "CFL": {
+      "class_file": "decompiled_cs\\BLELib\\BLELib.BLEDevice\\BLEDeviceCFL.cs",
+      "device_name_match": "NIPRO CF",
+      "string_constants": {},
+      "byte_constants": {},
+      "int_constants": {
+        "PAIRING_REQUEST_TIMEOUT": 30000
+      },
+      "static_byte_arrays": [],
+      "guid_parses": [],
+      "task_delays_ms": [
+        1,
+        100
+      ],
+      "write_payloads": [
+        {
+          "method": "",
+          "bytes": [
+            4,
+            1
+          ],
+          "hex": "04 01",
+          "line": 521,
+          "context": "Log.Info(\"\u3010BLELib\u3011\u3010BLEDeviceCFL\u3011\u3010ReciveStart\u3011\u30c7\u30fc\u30bf\u4ef6\u6570\u53d6\u5f97 WriteAsync:Service=\" + service.Id.ToString() + \", Characteristic=\" + characteristic2.Id.ToString() + \", dat"
+        },
+        {
+          "method": "",
+          "bytes": [
+            1,
+            1
+          ],
+          "hex": "01 01",
+          "line": 585,
+          "context": "Log.Info(\"\u3010BLELib\u3011\u3010BLEDeviceCFL\u3011\u3010ReciveStart\u3011\u30c7\u30fc\u30bf\u53d6\u5f97 WriteAsync:Service=\" + service.Id.ToString() + \", Characteristic=\" + characteristic2.Id.ToString() + \", data="
+        },
+        {
+          "method": "PairingAllRecieve",
+          "bytes": [
+            4,
+            1
+          ],
+          "hex": "04 01",
+          "line": 766,
+          "context": "data = new byte[2] { 4, 1 };"
+        },
+        {
+          "method": "PairingAllRecieve",
+          "bytes": [
+            1,
+            1
+          ],
+          "hex": "01 01",
+          "line": 781,
+          "context": "data = new byte[2] { 1, 1 };"
+        },
+        {
+          "method": "GetLastSEQNo",
+          "bytes": [
+            4,
+            3,
+            1,
+            0,
+            0
+          ],
+          "hex": "04 03 01 00 00",
+          "line": 942,
+          "context": "Log.Info(\"\u3010BLELib\u3011\u3010BLEDeviceCFL\u3011\u3010GetLastSEQNo\u3011WriteAsync:Service=Glucose Meter Service, Characteristic=\" + characteristic.Id.ToString() + \", data=\" + BitConvert"
+        }
+      ],
+      "uuid_dictionaries": {
+        "_UuidsS": {
+          "Glucose Meter Service": "5D87A4A0-E42D-11E5-BEEF-0002A5D5C51B",
+          "Glucose Meter Extension Service": "7A1A0001-8D7F-1727-A23F-DEDB5BF5DF46",
+          "Time and Alarm Setting Service": "87F60001-A469-1EF4-637F-78B96A6F358B",
+          "Device Information Service": "8E5996E0-E42F-11E5-AF97-0002A5D5C51B",
+          "Battery Service": "74D4C620-E431-11E5-B5F8-0002A5D5C51B"
+        },
+        "_Uuids1": {
+          "Glucose Measurement": "5D87A4A1-E42D-11E5-BEEF-0002A5D5C51B",
+          "Glucose Measurement Context": "5D87A4A2-E42D-11E5-BEEF-0002A5D5C51B",
+          "Record Access Control Point": "5D87A4A3-E42D-11E5-BEEF-0002A5D5C51B",
+          "Glucose Feature": "5D87A4A4-E42D-11E5-BEEF-0002A5D5C51B"
+        },
+        "_Uuids2": {
+          "Target Glucose Concentration": "7A1A0002-8D7F-1727-A23F-DEDB5BF5DF46",
+          "Remote Device Information": "7A1A0003-8D7F-1727-A23F-DEDB5BF5DF46",
+          "Fixed Message": "7A1A0005-8D7F-1727-A23F-DEDB5BF5DF46",
+          "Image Data Transfer": "7A1A0006-8D7F-1727-A23F-DEDB5BF5DF46",
+          "Transfer Access Control Point": "7A1A0007-8D7F-1727-A23F-DEDB5BF5DF46"
+        },
+        "_Uuids3": {
+          "Current Time": "87F60002-A469-1EF4-637F-78B96A6F358B"
+        },
+        "_Uuids4": {
+          "Manufacturer Name String": "8E5996E1-E42F-11E5-AF97-0002A5D5C51B",
+          "Model Number String": "8E5996E2-E42F-11E5-AF97-0002A5D5C51B",
+          "Serial Number String": "8E5996E3-E42F-11E5-AF97-0002A5D5C51B",
+          "Hardware Revision String": "8E5996E4-E42F-11E5-AF97-0002A5D5C51B",
+          "Firmware Revision String": "8E5996E5-E42F-11E5-AF97-0002A5D5C51B",
+          "Software Revision String": "8E5996E6-E42F-11E5-AF97-0002A5D5C51B"
+        }
+      }
+    },
+    "MightySat": {
+      "class_file": "decompiled_cs\\BLELib\\BLELib.BLEDevice\\BLEDeviceMightySat.cs",
+      "device_name_match": "MightySat",
+      "string_constants": {
+        "SERVICE_UUID": "54c21000-a720-4b4f-11e4-9fe20002a5d5",
+        "INCOMING_UUID": "54c21001-a720-4b4f-11e4-9fe20002a5d5",
+        "GOINGOUT_UUID": "54c21002-a720-4b4f-11e4-9fe20002a5d5"
+      },
+      "byte_constants": {
+        "GetDeviceInformation": 1,
+        "SetClock": 2,
+        "EnableStream": 3,
+        "Waveforms": 4,
+        "Parameters": 5,
+        "GetTrendRecord": 6,
+        "ClearallTrend": 7,
+        "Ack": 254,
+        "Nack": 255,
+        "SOM": 119
+      },
+      "int_constants": {
+        "PULSE_SEARCH_BIT": 64
+      },
+      "static_byte_arrays": [],
+      "guid_parses": [
+        "54c21000-a720-4b4f-11e4-9fe20002a5d5",
+        "54c21001-a720-4b4f-11e4-9fe20002a5d5",
+        "54c21002-a720-4b4f-11e4-9fe20002a5d5"
+      ],
+      "task_delays_ms": [
+        100
+      ],
+      "write_payloads": [],
+      "uuid_dictionaries": {}
+    },
+    "NBCM": {
+      "class_file": "decompiled_cs\\BLELib\\BLELib.BLEDevice\\BLEDeviceNBCM.cs",
+      "device_name_match": "NBCM",
+      "string_constants": {},
+      "byte_constants": {},
+      "int_constants": {},
+      "static_byte_arrays": [],
+      "guid_parses": [
+        "00001805-0000-1000-8000-00805F9B34FB",
+        "0000180A-0000-1000-8000-00805F9B34FB",
+        "0000181B-0000-1000-8000-00805F9B34FB",
+        "0000181C-0000-1000-8000-00805F9B34FB",
+        "0000181D-0000-1000-8000-00805F9B34FB",
+        "00002A25-0000-1000-8000-00805F9B34FB",
+        "00002A2B-0000-1000-8000-00805F9B34FB",
+        "00002A85-0000-1000-8000-00805F9B34FB",
+        "00002A8A-0000-1000-8000-00805F9B34FB",
+        "00002A8C-0000-1000-8000-00805F9B34FB",
+        "00002A8E-0000-1000-8000-00805F9B34FB",
+        "00002A9C-0000-1000-8000-00805F9B34FB",
+        "00002A9D-0000-1000-8000-00805F9B34FB",
+        "00002A9F-0000-1000-8000-00805F9B34FB",
+        "11127000-B364-11E4-AB27-0800200C9A66",
+        "11127001-B364-11E4-AB27-0800200C9A66",
+        "11127002-B364-11E4-AB27-0800200C9A66"
+      ],
+      "task_delays_ms": [
+        1000,
+        2000
+      ],
+      "write_payloads": [
+        {
+          "method": "SetOperationMode",
+          "bytes": [
+            4,
+            1,
+            5,
+            10,
+            0
+          ],
+          "hex": "04 01 05 0A 00",
+          "line": 704,
+          "context": "await MainThread.InvokeOnMainThreadAsync(async () => result = await characteristic.WriteAsync(request));"
+        },
+        {
+          "method": "RegisterNewUser",
+          "bytes": [
+            1,
+            226,
+            7
+          ],
+          "hex": "01 E2 07",
+          "line": 727,
+          "context": "byte[] request = new byte[3] { 1, 226, 7 };"
+        },
+        {
+          "method": "UserNoAvailabilityCheck",
+          "bytes": [
+            3,
+            1,
+            20,
+            18
+          ],
+          "hex": "03 01 14 12",
+          "line": 753,
+          "context": "byte[] request = new byte[4] { 3, 1, 20, 18 };"
+        },
+        {
+          "method": "DeleteSettings",
+          "bytes": [
+            3,
+            1,
+            176,
+            0
+          ],
+          "hex": "03 01 B0 00",
+          "line": 770,
+          "context": "byte[] request = new byte[4] { 3, 1, 176, 0 };"
+        },
+        {
+          "method": "DeleteSettings",
+          "bytes": [
+            3,
+            1,
+            175,
+            0
+          ],
+          "hex": "03 01 AF 00",
+          "line": 778,
+          "context": "byte[] factorySettingRequest = new byte[4] { 3, 1, 175, 0 };"
+        },
+        {
+          "method": "DeleteUser",
+          "bytes": [
+            4,
+            1,
+            20,
+            19,
+            0
+          ],
+          "hex": "04 01 14 13 00",
+          "line": 803,
+          "context": "await MainThread.InvokeOnMainThreadAsync(async () => result = await characteristic.WriteAsync(request));"
+        },
+        {
+          "method": "DeleteUser",
+          "bytes": [
+            3
+          ],
+          "hex": "03",
+          "line": 827,
+          "context": "byte[] request = new byte[1] { 3 };"
+        },
+        {
+          "method": "UserAuthentication",
+          "bytes": [
+            2,
+            0,
+            226,
+            7
+          ],
+          "hex": "02 00 E2 07",
+          "line": 858,
+          "context": "await MainThread.InvokeOnMainThreadAsync(async () => result = await characteristic.WriteAsync(request));"
+        },
+        {
+          "method": "SetHeight",
+          "bytes": [
+            5,
+            1,
+            20,
+            24,
+            0,
+            0
+          ],
+          "hex": "05 01 14 18 00 00",
+          "line": 1022,
+          "context": "await MainThread.InvokeOnMainThreadAsync(async () => result2 = await characteristic.WriteAsync(request));"
+        },
+        {
+          "method": "MeasurementResultDisplaySetting",
+          "bytes": [
+            4,
+            1,
+            5,
+            32,
+            1
+          ],
+          "hex": "04 01 05 20 01",
+          "line": 1032,
+          "context": "byte[] request = new byte[5] { 4, 1, 5, 32, 1 };"
+        },
+        {
+          "method": "BodyFatPercentageMeasurement",
+          "bytes": [
+            4,
+            1,
+            5,
+            34,
+            1
+          ],
+          "hex": "04 01 05 22 01",
+          "line": 1044,
+          "context": "byte[] request = new byte[5] { 4, 1, 5, 34, 1 };"
+        },
+        {
+          "method": "MedicalExaminationModeDisabled",
+          "bytes": [
+            4,
+            1,
+            5,
+            40,
+            0
+          ],
+          "hex": "04 01 05 28 00",
+          "line": 1056,
+          "context": "byte[] request = new byte[5] { 4, 1, 5, 40, 0 };"
+        },
+        {
+          "method": "AirplaneModeDisabled",
+          "bytes": [
+            4,
+            1,
+            5,
+            44,
+            0
+          ],
+          "hex": "04 01 05 2C 00",
+          "line": 1068,
+          "context": "byte[] request = new byte[5] { 4, 1, 5, 44, 0 };"
+        },
+        {
+          "method": "DeviceDisconnect",
+          "bytes": [
+            3,
+            1,
+            19,
+            0
+          ],
+          "hex": "03 01 13 00",
+          "line": 1092,
+          "context": "byte[] request = new byte[4] { 3, 1, 19, 0 };"
+        },
+        {
+          "method": "FreeColor",
+          "bytes": [
+            3,
+            1,
+            65,
+            2
+          ],
+          "hex": "03 01 41 02",
+          "line": 1166,
+          "context": "byte[] request = new byte[4] { 3, 1, 65, 2 };"
+        },
+        {
+          "method": "SetColor",
+          "bytes": [
+            4,
+            1,
+            65,
+            0,
+            0
+          ],
+          "hex": "04 01 41 00 00",
+          "line": 1201,
+          "context": "await MainThread.InvokeOnMainThreadAsync(async () => writeResult = await characteristic.WriteAsync(request));"
+        }
+      ],
+      "uuid_dictionaries": {}
+    },
+    "NBP1": {
+      "class_file": "decompiled_cs\\BLELib\\BLELib.BLEDevice\\BLEDeviceNBP1.cs",
+      "device_name_match": "NBP-1BLE",
+      "string_constants": {
+        "SERVICE_UUID": "0000180F-0000-1000-8000-00805F9B34FB",
+        "BLOOD_PRESSURE_MEASUREMENT": "00002A35-0000-1000-8000-00805F9B34FB",
+        "DATE_TIME": "00002A08-0000-1000-8000-00805F9B34FB",
+        "SYSTEM_ID": "00002A23-0000-1000-8000-00805F9B34FB",
+        "MODEL_NUMBER": "00002A24-0000-1000-8000-00805F9B34FB",
+        "SERIAL_NUMBER": "00002A25-0000-1000-8000-00805F9B34FB",
+        "FIRMWARE_REVISION": "00002A26-0000-1000-8000-00805F9B34FB",
+        "HARDWARE_REVISION": "00002A27-0000-1000-8000-00805F9B34FB",
+        "SOFTWARE_REVISION": "00002A28-0000-1000-8000-00805F9B34FB",
+        "MANUFACTURE_NAME": "00002A29-0000-1000-8000-00805F9B34FB",
+        "REGISTRATION_CERTIFICATION_DATA": "00002A2A-0000-1000-8000-00805F9B34FB",
+        "BATTERY_LEVEL": "00002A19-0000-1000-8000-00805F9B34FB",
+        "COMMON_UUID_TAIL": "-0000-1000-8000-00805F9B34FB",
+        "PRIMARY_SERVICE_UUID": "00001810-0000-1000-8000-00805F9B34FB"
+      },
+      "byte_constants": {},
+      "int_constants": {
+        "PAIRING_REQUEST_TIMEOUT": 30000
+      },
+      "static_byte_arrays": [],
+      "guid_parses": [
+        "0000180A-0000-1000-8000-00805F9B34FB",
+        "00001810-0000-1000-8000-00805F9B34FB",
+        "00002A08-0000-1000-8000-00805F9B34FB",
+        "00002A25-0000-1000-8000-00805F9B34FB"
+      ],
+      "task_delays_ms": [
+        100,
+        1000
+      ],
+      "write_payloads": [],
+      "uuid_dictionaries": {}
+    },
+    "NSM1": {
+      "class_file": "decompiled_cs\\BLELib\\BLELib.BLEDevice\\BLEDeviceNSM1.cs",
+      "device_name_match": "NSM-1BLE",
+      "string_constants": {
+        "SERVICE_UUID": "233BF000-5A34-1B6D-975C-000D5690ABE4",
+        "TEMPERATURE_MEASUREMENT": "00002A1C-0000-1000-8000-00805F9B34FB",
+        "TEMPERATURE_TYPE": "00002A1D-0000-1000-8000-00805F9B34FB",
+        "DATE_TIME": "00002A08-0000-1000-8000-00805F9B34FB",
+        "SYSTEM_ID": "00002A23-0000-1000-8000-00805F9B34FB",
+        "MODEL_NUMBER": "00002A24-0000-1000-8000-00805F9B34FB",
+        "SERIAL_NUMBER": "00002A25-0000-1000-8000-00805F9B34FB",
+        "FIRMWARE_REVISION": "00002A26-0000-1000-8000-00805F9B34FB",
+        "HARDWARE_REVISION": "00002A27-0000-1000-8000-00805F9B34FB",
+        "SOFTWARE_REVISION": "00002A28-0000-1000-8000-00805F9B34FB",
+        "MANUFACTURE_NAME": "00002A29-0000-1000-8000-00805F9B34FB",
+        "REGISTRATION_CERTIFICATION_DATA": "00002A2A-0000-1000-8000-00805F9B34FB",
+        "BATTERY_LEVEL": "00002A19-0000-1000-8000-00805F9B34FB",
+        "CUSTOM_CHARACTERISTIC": "233BF001-5A34-1B6D-975C-000D5690ABE4",
+        "COMMON_UUID_TAIL": "-0000-1000-8000-00805F9B34FB",
+        "PRIMARY_SERVICE_UUID": "00001809-0000-1000-8000-00805F9B34FB"
+      },
+      "byte_constants": {},
+      "int_constants": {
+        "PAIRING_REQUEST_TIMEOUT": 30000
+      },
+      "static_byte_arrays": [
+        {
+          "name": "SET_TIME_AS_HEADER",
+          "bytes": [
+            8,
+            1,
+            1
+          ],
+          "hex": "08 01 01"
+        },
+        {
+          "name": "DISCONNECT",
+          "bytes": [
+            2,
+            1,
+            3
+          ],
+          "hex": "02 01 03"
+        },
+        {
+          "name": "READ_SET_TIME_AND_DATE",
+          "bytes": [
+            2,
+            0,
+            4
+          ],
+          "hex": "02 00 04"
+        },
+        {
+          "name": "UNPAIR",
+          "bytes": [
+            2,
+            1,
+            16
+          ],
+          "hex": "02 01 10"
+        },
+        {
+          "name": "DELETE_ALL_MEMORY",
+          "bytes": [
+            2,
+            1,
+            18
+          ],
+          "hex": "02 01 12"
+        },
+        {
+          "name": "SET_BUFFER_SIZE_AS_HEADER",
+          "bytes": [
+            3,
+            1,
+            166
+          ],
+          "hex": "03 01 A6"
+        },
+        {
+          "name": "SET_BUFFER_SIZE_AS_VALUE_FOR_NINETY",
+          "bytes": [
+            1
+          ],
+          "hex": "01"
+        },
+        {
+          "name": "READ_DEVICE_SETTINGS",
+          "bytes": [
+            2,
+            0,
+            219
+          ],
+          "hex": "02 00 DB"
+        },
+        {
+          "name": "REQUEST_TO_SEND_DATA_IN_BUFFER",
+          "bytes": [
+            2,
+            0,
+            225
+          ],
+          "hex": "02 00 E1"
+        }
+      ],
+      "guid_parses": [
+        "00001809-0000-1000-8000-00805F9B34FB",
+        "0000180A-0000-1000-8000-00805F9B34FB",
+        "00002A08-0000-1000-8000-00805F9B34FB",
+        "00002A25-0000-1000-8000-00805F9B34FB",
+        "233BF000-5A34-1B6D-975C-000D5690ABE4",
+        "233BF001-5A34-1B6D-975C-000D5690ABE4"
+      ],
+      "task_delays_ms": [
+        100,
+        1000
+      ],
+      "write_payloads": [],
+      "uuid_dictionaries": {}
+    },
+    "NT100B": {
+      "class_file": "decompiled_cs\\BLELib\\BLELib.BLEDevice\\BLEDeviceNT100B.cs",
+      "device_name_match": "NT-100B",
+      "string_constants": {
+        "SERVICE_UUID": "00001523-1212-EFDE-1523-785FEABCD123",
+        "TEMPERATURE_MEASUREMENT": "00002A1C-0000-1000-8000-00805F9B34FB",
+        "SYSTEM_ID": "00002A23-0000-1000-8000-00805F9B34FB",
+        "MODEL_NUMBER": "00002A24-0000-1000-8000-00805F9B34FB",
+        "SERIAL_NUMBER": "00002A25-0000-1000-8000-00805F9B34FB",
+        "FIRMWARE_REVISION": "00002A26-0000-1000-8000-00805F9B34FB",
+        "HARDWARE_REVISION": "00002A27-0000-1000-8000-00805F9B34FB",
+        "SOFTWARE_REVISION": "00002A28-0000-1000-8000-00805F9B34FB",
+        "MANUFACTURE_NAME": "00002A29-0000-1000-8000-00805F9B34FB",
+        "PnP_ID": "00002A50-0000-1000-8000-00805F9B34FB",
+        "REGISTRATION_CERTIFICATION_DATA": "00002A2A-0000-1000-8000-00805F9B34FB",
+        "WRITE_REQ": "00001524-1212-EFDE-1523-785FEABCD123",
+        "NOTIFICATION": "00001524-1212-EFDE-1523-785FEABCD123",
+        "COMMON_UUID_TAIL": "-0000-1000-8000-00805F9B34FB",
+        "PRIMARY_SERVICE_UUID": "00001809-0000-1000-8000-00805F9B34FB"
+      },
+      "byte_constants": {
+        "ReadDeviceClockTime": 35,
+        "ReadDeviceModel": 36,
+        "ReadTheStorageDataWithIndexTime": 37,
+        "ReadTheStorageDataWithIndexResult": 38,
+        "ReadDeviceSerialNumber1": 39,
+        "ReadDeviceSerialNumber2": 40,
+        "ReadStorageNumberOfData": 43,
+        "WriteSystemClockTime": 51,
+        "StartAnInfraRedTemperatureMeasurement": 65,
+        "TurnOffTheDevice": 80,
+        "ClearDeleteAllMemory": 82,
+        "NotificationForEnteringCommunicationMode": 84
+      },
+      "int_constants": {
+        "PAIRING_REQUEST_TIMEOUT": 30000
+      },
+      "static_byte_arrays": [],
+      "guid_parses": [
+        "00001523-1212-EFDE-1523-785FEABCD123",
+        "00001524-1212-EFDE-1523-785FEABCD123"
+      ],
+      "task_delays_ms": [
+        100,
+        1000
+      ],
+      "write_payloads": [],
+      "uuid_dictionaries": {}
+    },
+    "UM212": {
+      "class_file": "decompiled_cs\\BLELib\\BLELib.BLEDevice\\BLEDeviceUM212.cs",
+      "device_name_match": "NMBP",
+      "string_constants": {
+        "SERVICE_UUID": "0000180F-0000-1000-8000-00805F9B34FB",
+        "BLOOD_PRESSURE_MEASUREMENT": "00002A35-0000-1000-8000-00805F9B34FB",
+        "DATE_TIME": "00002A08-0000-1000-8000-00805F9B34FB",
+        "SYSTEM_ID": "00002A23-0000-1000-8000-00805F9B34FB",
+        "MODEL_NUMBER": "00002A24-0000-1000-8000-00805F9B34FB",
+        "SERIAL_NUMBER": "00002A25-0000-1000-8000-00805F9B34FB",
+        "FIRMWARE_REVISION": "00002A26-0000-1000-8000-00805F9B34FB",
+        "HARDWARE_REVISION": "00002A27-0000-1000-8000-00805F9B34FB",
+        "SOFTWARE_REVISION": "00002A28-0000-1000-8000-00805F9B34FB",
+        "MANUFACTURE_NAME": "00002A29-0000-1000-8000-00805F9B34FB",
+        "REGISTRATION_CERTIFICATION_DATA": "00002A2A-0000-1000-8000-00805F9B34FB",
+        "BATTERY_LEVEL": "00002A19-0000-1000-8000-00805F9B34FB",
+        "COMMON_UUID_TAIL": "-0000-1000-8000-00805F9B34FB",
+        "PRIMARY_SERVICE_UUID": "00001810-0000-1000-8000-00805F9B34FB"
+      },
+      "byte_constants": {},
+      "int_constants": {
+        "PAIRING_REQUEST_TIMEOUT": 30000
+      },
+      "static_byte_arrays": [],
+      "guid_parses": [
+        "0000180A-0000-1000-8000-00805F9B34FB",
+        "00001810-0000-1000-8000-00805F9B34FB",
+        "00002A08-0000-1000-8000-00805F9B34FB",
+        "00002A25-0000-1000-8000-00805F9B34FB"
+      ],
+      "task_delays_ms": [
+        100,
+        1000
+      ],
+      "write_payloads": [],
+      "uuid_dictionaries": {}
+    }
+  }
+}

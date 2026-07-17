@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+<resheader name="resmimetype"><value>text/microsoft-resx</value></resheader><resheader name="version"><value>1.3</value></resheader><resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader><resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader><data name="FACILITIES_NAME_WHEN_HOSPITAL_NOT_SET" xml:space="preserve"><value>未設定</value></data>
+  <data name="ALERT_DIALOG_TITLE" xml:space="preserve"><value>警告</value></data>
+  <data name="MESSAGE_001" xml:space="preserve"><value>処理中にエラーが発生しました。</value></data>
+  <data name="MESSAGE_003" xml:space="preserve"><value>該当するデータ共有先が見つかりませんでした。</value></data>
+  <data name="MESSAGE_002" xml:space="preserve"><value>同じデータ共有先には変更できません。</value></data>
+  <data name="MESSAGE_005" xml:space="preserve"><value>写真撮影中にエラーが発生しました。</value></data>
+  <data name="MESSAGE_004" xml:space="preserve"><value>写真選択中にエラーが発生しました。</value></data>
+  <data name="MESSAGE_007" xml:space="preserve"><value>身長、性別、生年月日を登録することで体組成情報も取得できるようになります。</value></data>
+  <data name="MESSAGE_006" xml:space="preserve"><value>メーラーが起動できませんでした。</value></data>
+  <data name="MESSAGE_009" xml:space="preserve"><value>ユーザー削除に失敗しました。再度やり直してください。</value></data>
+  <data name="MESSAGE_008" xml:space="preserve"><value>ユーザーNoに空きがありません。最も古いユーザーを削除しますか？</value></data>
+  <data name="MESSAGE_010" xml:space="preserve"><value>表示色の登録に失敗しました。再度やり直してください。</value></data>
+  <data name="MESSAGE_011" xml:space="preserve"><value>器機との通信に失敗しました。再度やり直してください。</value></data>
+  <data name="MESSAGE_012" xml:space="preserve"><value>同じデータ共有先は登録できません。</value></data>
+  <data name="MESSAGE_013" xml:space="preserve"><value>WEB機能の利用にはユーザー情報の登録が必要です。</value></data>
+  <data name="MESSAGE_014" xml:space="preserve"><value>登録されている身長に小数点が含まれている。もしくは、範囲外の身長が登録されています。ユーザー情報を更新してください。</value></data>
+  <data name="DEFAULT_WAIT_MESSAGE" xml:space="preserve"><value>しばらくお待ちください...</value></data>
+  </root>

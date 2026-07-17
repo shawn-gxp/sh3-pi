@@ -19,6 +19,8 @@ from .and_ua651 import (
     encode_date_time_2a08,
 )
 from .htp import HtpTemperatureParser, parse_temperature_measurement
+from .nipro_cf import NiproCfParser, parse_cf_measurement
+from .nipro_common import encode_date_time_2a08 as nipro_encode_date_time_2a08
 
 __all__ = [
     "VitalParser",
@@ -34,4 +36,7 @@ __all__ = [
     "encode_date_time_2a08",
     "HtpTemperatureParser",
     "parse_temperature_measurement",
+    "NiproCfParser",
+    "parse_cf_measurement",
+    "nipro_encode_date_time_2a08",
 ]

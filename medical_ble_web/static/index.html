@@ -271,8 +271,28 @@
         <button id="btnLive" type="button">Live start</button>
         <button id="btnStop" class="danger secondary" type="button">Live stop</button>
         <button id="btnRefresh" class="secondary" type="button">Refresh data</button>
+        <button id="btnCycle" type="button" style="background: #3ecf8e; color: #000;">Auto-Cycle</button>
+        <button id="btnCycleStop" class="danger secondary" type="button">Stop Cycle</button>
+        <button id="btnHandsfree" type="button" style="background: #6c9eff; color: #000;">Nipro Hands-free</button>
+        <button id="btnHandsfreeStop" class="danger secondary" type="button">Stop Hands-free</button>
       </div>
       <div id="actionStatus" class="notes">Ready.</div>
+      <p class="notes" id="niproHandsfreeMeta">Nipro post-measure (Omron-like): measure → display can go off → Sync within ~1–2 min (or Hands-free). NT-100B dumps on-device history; NBP waits for BP indicate; MightySat needs Live while on finger.</p>
+    </section>
+
+    <!-- Multi-Device Auto-Cycle Dashboard -->
+    <section class="card" id="dashboardCard">
+      <div class="section-head">
+        <h2>
+          <span class="live-dot" id="cycleDot"></span>
+          <span id="cycleTitle">Multi-Device Dashboard</span>
+        </h2>
+        <span class="count-pill" id="cycleModeLabel">idle</span>
+      </div>
+      <div id="dashboardGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-top: 0.5rem; margin-bottom: 0.5rem;">
+        <!-- Dashboard cards injected via JS -->
+      </div>
+      <div class="panel-meta" id="cycleMeta">Start Auto-Cycle to poll all saved clinical devices sequentially.</div>
     </section>
 
     <!-- Latest for selected device (sync history / last clinical) -->
@@ -502,10 +522,12 @@
     /** Vital layout kind for brand. */
     function brandVitalKind(brandId) {
       const id = (brandId || ($("brand") && $("brand").value) || "").toLowerCase();
+      const b = brands.find((x) => x.id === id);
+      if (b && b.vital_kind) return b.vital_kind;
       if (id === "masimo") return "spo2";
-      if (id === "omron" || id === "and" || id === "beurer") return "bp";
-      if (id === "thermo") return "temp";
-      if (id === "fora") return "glucose";
+      if (id === "omron" || id === "and" || id === "beurer" || id === "nipro_nbp" || id === "nipro_nmbp") return "bp";
+      if (id === "thermo" || id === "nipro_nt100b" || id === "nipro_nsm1") return "temp";
+      if (id === "fora" || id === "nipro_cf") return "glucose";
       return "generic";
     }
 
@@ -782,6 +804,9 @@
         try {
           const data = JSON.parse(ev.data);
           if (data.live) applyLiveSnapshot(data.live, data.event === "tick" ? "ws-tick" : "ws");
+          if (data.event === "dashboard" || data.dashboard) {
+            applyDashboard(data.dashboard);
+          }
         } catch (_) {}
       };
       liveWs.onerror = () => setWsBadge("WS: error", false);
@@ -849,9 +874,10 @@
     }
 
     async function refreshAll() {
-      const [devs, live] = await Promise.all([
+      const [devs, live, cycleData] = await Promise.all([
         api("/devices"),
         api("/live/latest"),
+        api("/cycle/status").catch(() => null),
       ]);
       renderDevices(devs.devices || []);
       await refreshReadingsOnly();
@@ -870,6 +896,10 @@
             "Not streaming. Device latest (above) shows last Sync/Read values.";
         }
       }
+
+      if (cycleData && cycleData.dashboard) {
+        applyDashboard(cycleData.dashboard);
+      }
     }
 
     function setFilter(mode) {
@@ -880,8 +910,16 @@
     }
 
     function busy(on) {
-      ["btnScan", "btnPair", "btnRepair", "btnSync", "btnLive", "btnSave"].forEach((id) => {
-        $(id).disabled = !!on;
+      [
+        "btnScan",
+        "btnPair",
+        "btnRepair",
+        "btnSync",
+        "btnLive",
+        "btnSave",
+        "btnHandsfree",
+      ].forEach((id) => {
+        if ($(id)) $(id).disabled = !!on;
       });
     }
 
@@ -942,21 +980,42 @@
         "status-run"
       );
       try {
+        const brandId = $("brand").value;
+        const scanName = (() => {
+          // Prefer exact name from last scan table if MAC matches
+          try {
+            const rows = document.querySelectorAll("#scanBody tr");
+            for (const tr of rows) {
+              const macCell = tr.children[1] && tr.children[1].textContent;
+              if (macCell && macCell.toUpperCase() === $("mac").value.trim().toUpperCase()) {
+                return (tr.children[2] && tr.children[2].textContent) || "";
+              }
+            }
+          } catch (_) {}
+          return $("model").value;
+        })();
         const data = await api("/pair", {
           method: "POST",
           body: JSON.stringify({
-            brand: $("brand").value,
+            brand: brandId,
             mac: $("mac").value,
             model: $("model").value,
+            name: scanName || $("model").value,
             repair: !!repair,
           }),
         });
         setStatus(`Pair OK · ${data.mac}`, "status-ok");
-        log(`Pair OK ${data.mac}`);
+        log(`Pair OK ${data.mac} profile=${data.profile || ""}`);
         (data.next_steps || []).forEach((t) => log("  → " + t));
-        if ($("brand").value === "omron") {
+        if (brandId === "omron") {
           setStatus(
             "Pair OK — try Sync now (no button). If FE4A error: short-press BT → Sync.",
+            "status-ok"
+          );
+        }
+        if (brandId.startsWith("nipro") || brandId === "masimo") {
+          setStatus(
+            "Pair OK — registered for Hands-free. Measure, then Sync or Hands-free wait.",
             "status-ok"
           );
         }
@@ -971,6 +1030,42 @@
     $("btnPair").onclick = () => doPair(false);
     $("btnRepair").onclick = () => doPair(true);
 
+    $("btnHandsfree").onclick = async () => {
+      busy(true);
+      setStatus("Nipro hands-free starting…", "status-run");
+      try {
+        const data = await api("/nipro/handsfree/start", {
+          method: "POST",
+          body: JSON.stringify({
+            duration_s: 3600,
+            receive_timeout: 60,
+            categories: "bp,ht,gl,spo2",
+          }),
+        });
+        setStatus(data.message || "Hands-free running", "status-ok");
+        log(data.message || "Hands-free started");
+        $("niproHandsfreeMeta").textContent =
+          "Hands-free active — take measurements on paired Nipro devices. Status via /nipro/handsfree/status.";
+      } catch (e) {
+        showError(e);
+      } finally {
+        busy(false);
+      }
+    };
+
+    $("btnHandsfreeStop").onclick = async () => {
+      try {
+        const data = await api("/nipro/handsfree/stop", { method: "POST", body: "{}" });
+        setStatus("Hands-free stopped", "status-ok");
+        log("Hands-free stopped");
+        $("niproHandsfreeMeta").textContent =
+          "Nipro: Pair a Nipro brand once (stores exact BLE name), then Hands-free waits for measurements like げんきノート.";
+        if (data.handsfree) log(JSON.stringify(data.handsfree));
+      } catch (e) {
+        showError(e);
+      }
+    };
+
     $("btnSync").onclick = async () => {
       if (!$("mac").value.trim()) {
         setStatus("Enter or pick a MAC first", "status-err");
@@ -981,20 +1076,26 @@
       const omron = brandId === "omron";
       const isAnd = brandId === "and";
       const isMasimo = brandId === "masimo";
-      const isThermo = brandId === "thermo";
+      const isThermo = brandId === "thermo" || brandId === "nipro_nt100b" || brandId === "nipro_nsm1";
+      const isNiproBp = brandId === "nipro_nbp" || brandId === "nipro_nmbp";
+      const isNiproCf = brandId === "nipro_cf";
       if (isMasimo) log("Masimo: Sync is a short snapshot. For continuous SpO2 use Live start.");
-      if (isThermo) log("NT-100B: measure first, then Sync within ~2 min while BLE is on.");
+      if (isThermo) log("NT-100B: measure first — display may go off; Sync within ~2 min (pulls full on-device history).");
+      if (isNiproBp) log("Nipro BP: measure on cuff — Sync soon after (hunts BLE ~2 min like Omron post-read).");
+      if (isNiproCf) log("Nipro CF: glucose dump via proprietary RACP.");
       if (omron) log("Omron: reading EEPROM history (up to 30 slots). Dashboard filters to this MAC.");
 
       setStatus(
         omron
           ? "Omron sync… (button only if FE4A fails)"
-          : isAnd
-          ? "A&D/Nipro sync… waiting for full Indicate dump…"
+          : isAnd || isNiproBp
+          ? "BP sync… waiting for Indicate dump…"
           : isMasimo
           ? "Masimo short sync (use Live for continuous SpO2)…"
           : isThermo
-          ? "NT-100B sync… (must be advertising after a measurement)"
+          ? "Thermometer sync… (must be advertising after a measurement)"
+          : isNiproCf
+          ? "Nipro CF glucose sync…"
           : "Syncing / reading…",
         "status-run"
       );
@@ -1004,13 +1105,19 @@
         $("btnFilterDevice").classList.add("active-filter");
         $("btnFilterAll").classList.remove("active-filter");
 
+        const listen =
+          omron ? 45 :
+          isAnd || isNiproBp || isNiproCf || brandId === "nipro_nsm1" || brandId === "nipro_nt100b" ? 60 :
+          isThermo && brandId === "thermo" ? 20 :
+          30;
+
         const data = await api("/sync", {
           method: "POST",
           body: JSON.stringify({
             brand: brandId,
             mac: $("mac").value,
             model: $("model").value,
-            listen_s: omron ? 45 : isAnd ? 60 : isThermo ? 20 : 30,
+            listen_s: listen,
           }),
         });
 
@@ -1129,6 +1236,120 @@
         log(String(e.message || e), "status-err");
       }
     };
+
+    $("btnCycle").onclick = async () => {
+      busy(true);
+      setStatus("Starting Auto-Cycle…", "status-run");
+      try {
+        const data = await api("/cycle/start", {
+          method: "POST",
+          body: JSON.stringify({ slot_s: 30.0, rounds: 0 }),
+        });
+        setStatus(data.message || "Auto-Cycle started", "status-ok");
+        log(data.message || "Auto-Cycle started");
+        if (data.dashboard) applyDashboard(data.dashboard);
+      } catch (e) {
+        showError(e);
+      } finally {
+        busy(false);
+      }
+    };
+
+    $("btnCycleStop").onclick = async () => {
+      busy(true);
+      try {
+        const data = await api("/cycle/stop", { method: "POST", body: "{}" });
+        setStatus(data.message || "Auto-Cycle stopped", "status-ok");
+        log("Auto-Cycle stopped");
+        if (data.dashboard) applyDashboard(data.dashboard);
+      } catch (e) {
+        log(String(e.message || e), "status-err");
+      } finally {
+        busy(false);
+      }
+    };
+
+    function applyDashboard(dash) {
+      if (!dash) return;
+      const cs = dash.cycle || {};
+      $("cycleTitle").textContent = cs.active ? "Multi-Device Dashboard (Polling)" : "Multi-Device Dashboard (Idle)";
+      $("cycleDot").classList.toggle("on", !!cs.active);
+      $("cycleModeLabel").textContent = cs.status || "idle";
+      
+      const msg = cs.message ? ` · ${cs.message}` : "";
+      $("cycleMeta").textContent = cs.active 
+        ? `Round ${cs.round || 0}${msg}`
+        : "Start Auto-Cycle to poll all saved clinical devices sequentially.";
+
+      const grid = $("dashboardGrid");
+      // Remove any cards that are no longer in the dashboard
+      const incomingMacs = new Set((dash.board || []).map(c => c.mac));
+      Array.from(grid.children).forEach(child => {
+        const macStr = child.id.replace("dash-card-", "");
+        if (!incomingMacs.has(macStr)) {
+          grid.removeChild(child);
+        }
+      });
+
+      (dash.board || []).forEach(card => {
+        const safeMac = card.mac.replace(/:/g, "");
+        let div = document.getElementById("dash-card-" + safeMac);
+        if (!div) {
+            div = document.createElement("div");
+            div.id = "dash-card-" + safeMac;
+            div.className = "card";
+            div.style.cursor = "pointer";
+            div.onclick = () => {
+              $("brand").value = card.brand;
+              onBrandChange();
+              $("model").value = card.model || $("model").value;
+              $("mac").value = card.mac;
+              saveDeviceSelection();
+              log(`Selected ${card.mac} from Dashboard`);
+              setFilter("device");
+              refreshReadingsOnly().catch(() => {});
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+            grid.appendChild(div);
+        }
+
+        if (card.active) {
+          div.style.borderColor = "var(--ok)";
+          div.style.boxShadow = "0 0 8px rgba(62, 207, 142, 0.4)";
+        } else {
+          div.style.borderColor = "var(--border)";
+          div.style.boxShadow = "none";
+        }
+        
+        const dotStr = card.active ? `<span class="live-dot on"></span>` : "";
+        let statusText = "idle";
+        let statusStyle = "";
+        if (card.active) {
+            statusText = "reading";
+            statusStyle = "background-color: var(--ok); color: #000;";
+        } else if (card.online === false) {
+            statusText = "offline";
+            statusStyle = "background-color: var(--bg-hover); color: var(--text-muted);";
+        }
+        
+        const statusBadge = `<span class="count-pill" style="${statusStyle}">${statusText}</span>`;
+        const headHtml = `<h3>${dotStr}${card.name || card.model || card.brand}</h3> <div>${statusBadge}</div>`;
+        
+        // Use tilesForKind to render vitals, but we need to pass a synthesized row
+        let row = null;
+        if (card.vitals) {
+           row = { ...card.vitals, brand: card.brand, mac: card.mac };
+        }
+        const vitalsHtml = tilesForKind(brandVitalKind(card.brand), row);
+        const metaHtml = card.mac + (row && row.measured_at ? ` · ${row.measured_at}` : " · no data");
+        
+        div.innerHTML = `
+            <div class="section-head">${headHtml}</div>
+            <div class="vitals-grid" style="grid-template-columns: repeat(auto-fit, minmax(80px, 1fr))">${vitalsHtml}</div>
+            <div class="panel-meta" style="font-size: 0.75rem">${metaHtml}</div>
+        `;
+      });
+    }
 
     $("btnRefresh").onclick = () =>
       refreshAll().catch((e) => log(String(e), "status-err"));

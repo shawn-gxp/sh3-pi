@@ -61,6 +61,8 @@ from .profiles import DeviceProfile, get_profile, list_profiles
 from .parsers import mightysat as mightysat_mod
 from .parsers import thermometer as thermo_mod
 from .parsers import and_ua651 as and_mod
+from .parsers import nipro_common as nipro_mod
+from .parsers import nipro_cf as nipro_cf_mod
 
 log = logging.getLogger("medical_ble")
 
@@ -286,6 +288,8 @@ class MedicalBleClient:
         auto_dispatch: bool = False,
         pair: bool = False,
         connect_retries: int = 2,
+        find_timeout: float = 0.0,
+        name_hint: str = "",
     ):
         self.address = address
         self.profile = profile
@@ -294,6 +298,9 @@ class MedicalBleClient:
         # Windows: call client.pair() after connect (shows OS pairing dialog)
         self.pair = pair
         self.connect_retries = max(1, connect_retries)
+        # Omron-like: hunt device after measure while Nipro still advertises
+        self.find_timeout = max(0.0, float(find_timeout))
+        self.name_hint = (name_hint or "").strip()
         self._parser = get_parser(profile.parser_key)
         self._client: Optional[BleakClient] = None
         self._subscribed: Set[str] = set()
@@ -453,9 +460,22 @@ class MedicalBleClient:
                         )
                     return
             else:
-                results = [self._parser.parse(payload)]
+                # Pass characteristic UUID when parser supports it (NIPRO CF, etc.)
+                try:
+                    results = [
+                        self._parser.parse(payload, characteristic_uuid=uuid)
+                    ]
+                except TypeError:
+                    results = [self._parser.parse(payload)]
 
             for result in results:
+                if self._should_drop_companion_invalid(result):
+                    log.info(
+                        "[PARSE] drop invalid/sentinel packet=#%d → %s",
+                        seq,
+                        _brief(result),
+                    )
+                    continue
                 self.readings.append(result)
                 log.info("[PARSE] OK  packet=#%d  →  %s", seq, _brief(result))
                 if self.on_reading:
@@ -497,17 +517,39 @@ class MedicalBleClient:
         """
         Connect with WinRT-aware error handling and optional OS pairing.
 
-        Retries are useful on Windows because the first attempt often races
-        the device's short advertising window or a delayed pairing dialog.
+        If find_timeout > 0 (Omron-like post-measure), keep trying connect +
+        short scans until the device advertises again after a reading.
         """
+        import time as _time
+
+        find_budget = self.find_timeout
+        total_deadline = (
+            _time.monotonic() + find_budget if find_budget > 0 else None
+        )
+        # During find window use many short attempts (Nipro advertises briefly)
+        if find_budget > 0:
+            retries = max(self.connect_retries, 8)
+            attempt_timeout = min(timeout, 12.0)
+        else:
+            retries = self.connect_retries
+            attempt_timeout = timeout
+
         log.info(
-            "Connecting to %s (profile=%s, timeout=%.0fs, pair=%s, retries=%d)…",
+            "Connecting to %s (profile=%s, timeout=%.0fs, pair=%s, retries=%d, "
+            "find_window=%.0fs)…",
             self.address,
             self.profile.id,
-            timeout,
+            attempt_timeout,
             self.pair,
-            self.connect_retries,
+            retries,
+            find_budget,
         )
+        if find_budget > 0:
+            log.info(
+                "[POST-MEASURE] Omron-like hunt: will retry connect/scan for "
+                "%.0fs after measure (Nipro BLE window). Keep meter nearby.",
+                find_budget,
+            )
         if is_windows():
             log.info(
                 "[WINRT] bleak → Windows Runtime Bluetooth APIs. "
@@ -519,10 +561,31 @@ class MedicalBleClient:
             )
 
         last_exc: Optional[BaseException] = None
-        for attempt in range(1, self.connect_retries + 1):
-            log.info("[CONNECT] attempt %d/%d …", attempt, self.connect_retries)
+        attempt = 0
+        while True:
+            attempt += 1
+            if total_deadline is not None and _time.monotonic() >= total_deadline:
+                log.error(
+                    "[POST-MEASURE] find window %.0fs exhausted — device never "
+                    "connected. Take a new reading and Sync within the BLE window.",
+                    find_budget,
+                )
+                break
+            if total_deadline is None and attempt > retries:
+                break
+            if total_deadline is not None and attempt > 40:
+                break  # safety
+
+            log.info(
+                "[CONNECT] attempt %d%s …",
+                attempt,
+                f"/{retries}" if total_deadline is None else f" (find left {max(0, total_deadline - _time.monotonic()):.0f}s)",
+            )
             try:
-                await self._connect_once(timeout=timeout)
+                # Prefer reconnect when we just saw it advertising
+                if attempt > 1 and (find_budget > 0 or attempt <= retries):
+                    await self._scan_for_self(timeout=4.0)
+                await self._connect_once(timeout=attempt_timeout)
                 log.info("[CONNECT] success on attempt %d", attempt)
                 return
             except Exception as exc:  # classified below; re-raised after retries
@@ -535,8 +598,11 @@ class MedicalBleClient:
                     exc,
                 )
                 _log_winrt(exc, operation=f"connect(attempt={attempt})")
-                if attempt < self.connect_retries and diag.is_retryable:
-                    # Brief pause so WinRT can release the device handle
+                if total_deadline is not None:
+                    # Keep hunting through the post-measure window
+                    await asyncio.sleep(1.2)
+                    continue
+                if attempt < retries and diag.is_retryable:
                     delay = 1.5 * attempt
                     log.info(
                         "[CONNECT] retryable (%s) — waiting %.1fs before next attempt…",
@@ -549,6 +615,42 @@ class MedicalBleClient:
 
         assert last_exc is not None
         raise last_exc
+
+    async def _scan_for_self(self, timeout: float = 4.0) -> bool:
+        """
+        Brief scan to confirm target is advertising (post-measure wake).
+        Returns True if address or name_hint seen.
+        """
+        addr_u = self.address.strip().upper()
+        hint = self.name_hint.lower()
+        try:
+            devices = await scan_devices(profile=None, timeout=timeout, retries=1)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("[POST-MEASURE] scan probe failed: %s", exc)
+            return False
+        for d in devices:
+            daddr = (getattr(d, "address", "") or "").upper()
+            dname = (getattr(d, "name", None) or "") or ""
+            if daddr == addr_u:
+                log.info(
+                    "[POST-MEASURE] target advertising: %s name=%r",
+                    daddr,
+                    dname,
+                )
+                return True
+            if hint and hint in dname.lower():
+                log.info(
+                    "[POST-MEASURE] name match %r → %s (expected %s)",
+                    dname,
+                    daddr,
+                    addr_u,
+                )
+                # Update address if OS reports different form
+                if daddr:
+                    self.address = daddr
+                return True
+        log.debug("[POST-MEASURE] not advertising yet (scanned %d)", len(devices))
+        return False
 
     def _ble_device(self) -> BLEDevice:
         """
@@ -1039,56 +1141,294 @@ class MedicalBleClient:
         )
         await self._client.write_gatt_char(uuid, data, response=response)
 
+    def _should_drop_companion_invalid(self, result: Any) -> bool:
+        """Drop companion-rejected sentinels (BP 2047, temp 65535, CF control)."""
+        pid = self.profile.id
+        if getattr(result, "is_control_solution", False):
+            return True
+        if pid in ("nipro_nbp", "nipro_nmbp", "and_ua651", "beurer_bp", "beurer_bm54"):
+            if hasattr(result, "systolic"):
+                return nipro_mod.is_invalid_bp_companion(
+                    getattr(result, "systolic", None),
+                    getattr(result, "diastolic", None),
+                    getattr(result, "pulse_rate", None),
+                    getattr(result, "measured_at", None),
+                )
+        if pid in ("nipro_nt100b", "nipro_nsm1"):
+            if hasattr(result, "object_temperature"):
+                # Companion rejects 65535 / <0; allow missing timestamp (uses now)
+                t = getattr(result, "object_temperature", None)
+                if t is not None and (t == 65535.0 or t < 0):
+                    return True
+        return False
+
     async def run_post_connect_setup(self) -> None:
         """
         Device-specific host→peripheral commands (still pure bytes from parsers).
 
-        Sequences follow vendor datasheets so companion-app-like arming works
-        without RE guesswork (A&D 5s gate, thermo dual-wake, MightySat stream).
+        Sequences follow vendor datasheets + Nipro げんきノート companion BLELib.
         """
         if not self._client or not self._client.is_connected:
             return
         pid = self.profile.id
 
-        if pid == "mightysat" and self.profile.write_uuid:
+        # --- Nipro companion BP (NBP-1BLE / NMBP): 1s → 0x2A08 only ----------
+        if pid in ("nipro_nbp", "nipro_nmbp"):
             log.info(
-                "MightySat: SetClock + GetDeviceInfo + ConfigureStreaming "
-                "(CSD-1322B)…"
+                "Nipro BP (%s): companion path — settle %.0fs then DateTime 0x2A08",
+                pid,
+                nipro_mod.POST_CONNECT_CLOCK_DELAY_S,
+            )
+            if pid == "nipro_nmbp" and is_windows() and not self.pair:
+                log.warning(
+                    "[WINRT] NMBP usually needs OS bonding — re-run with --pair "
+                    "if serial/indications fail."
+                )
+            await asyncio.sleep(nipro_mod.POST_CONNECT_CLOCK_DELAY_S)
+            try:
+                await self._write_bytes(
+                    nipro_mod.DATE_TIME_UUID,
+                    nipro_mod.encode_date_time_2a08(),
+                    response=True,
+                    label="nipro_bp_2a08_clock",
+                )
+                try:
+                    back = await self._client.read_gatt_char(nipro_mod.DATE_TIME_UUID)
+                    log.info(
+                        "Nipro BP clock readback: %s",
+                        " ".join(f"{b:02X}" for b in bytes(back)[:8]),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("Nipro BP clock readback skipped: %s", exc)
+            except BleakError as exc:
+                log.error("Nipro BP 0x2A08 write failed: %s", exc)
+                _log_winrt(exc, operation="nipro_bp_clock")
+            await self._read_device_information()
+            return
+
+        # --- Nipro NSM-1BLE: 1s → HTS 0x2A08 + HTP indicate (already subscribed)
+        if pid == "nipro_nsm1":
+            log.info(
+                "Nipro NSM-1BLE: companion path — settle %.0fs then HTS DateTime 0x2A08",
+                nipro_mod.POST_CONNECT_CLOCK_DELAY_S,
+            )
+            await asyncio.sleep(nipro_mod.POST_CONNECT_CLOCK_DELAY_S)
+            try:
+                await self._write_bytes(
+                    nipro_mod.DATE_TIME_UUID,
+                    nipro_mod.encode_date_time_2a08(),
+                    response=True,
+                    label="nipro_nsm1_2a08_clock",
+                )
+            except BleakError as exc:
+                log.error("Nipro NSM-1BLE clock write failed: %s", exc)
+                _log_winrt(exc, operation="nipro_nsm1_clock")
+            return
+
+        # --- Nipro NT-100B: HTP listen + TICD pull latest (post-measure recovery)
+        if pid == "nipro_nt100b":
+            # Problem: companion only enables HTP notify, but the indication often
+            # fires at measure time *before* we connect — so HTP-only sync gets 0.
+            # Fix: after CCCD, actively pull TICD storage index 0 (latest) while
+            # still accepting HTP if it arrives. Then listen() can quiet-end early.
+            log.info(
+                "Nipro NT-100B: HTP notify already on + TICD pull latest stored "
+                "reading (post-measure recovery). Power-off on disconnect."
+            )
+            wu = self._resolved_write_uuid or self.profile.write_uuid
+            if not wu:
+                # resolve any writeable serial-like char
+                for svc, ch in self._iter_gatt_chars():
+                    props = [p.lower() for p in (ch.properties or [])]
+                    if "write" in props or "write-without-response" in props:
+                        uid = str(ch.uuid).lower().replace("-", "")
+                        if "1524" in uid or "fff" in uid:
+                            wu = str(ch.uuid)
+                            break
+            if not wu:
+                log.warning(
+                    "Nipro NT-100B: no TICD write char — HTP-only mode "
+                    "(must measure *while* connected for a reading)"
+                )
+                return
+
+            async def _tw(data: bytes, label: str) -> None:
+                try:
+                    await self._write_bytes(wu, data, response=False, label=label)
+                except BleakError:
+                    await self._write_bytes(
+                        wu, data, response=True, label=label + "_rsp"
+                    )
+
+            try:
+                from .nipro import post_measure as pm
+
+                # Dual-wake into communication mode (TICD §1.1)
+                wake = thermo_mod.cmd_wakeup_pair()
+                await _tw(wake, "nt100b_wake1")
+                await asyncio.sleep(0.45)
+                await _tw(wake, "nt100b_wake2")
+                await asyncio.sleep(0.55)
+                await _tw(thermo_mod.cmd_read_storage_count(), "nt100b_count")
+                await asyncio.sleep(0.45)
+                count = 1
+                for r in self.readings:
+                    if isinstance(r, dict) and r.get("type") == "storage_count":
+                        try:
+                            count = max(1, int(r.get("count") or 1))
+                        except (TypeError, ValueError):
+                            count = 1
+                        break
+                # Omron-like: dump all on-device history (up to NT100B_HISTORY_MAX)
+                max_hist = min(count, pm.NT100B_HISTORY_MAX)
+                log.info(
+                    "[POST-MEASURE] NT-100B TICD bulk dump: %d slot(s) "
+                    "(device count=%s) — like Omron history read",
+                    max_hist,
+                    count,
+                )
+                for index in range(max_hist):
+                    if not self._client or not self._client.is_connected:
+                        log.warning(
+                            "NT-100B disconnected mid-history at index %d", index
+                        )
+                        break
+                    if hasattr(self._parser, "set_history_index"):
+                        self._parser.set_history_index(index)  # type: ignore[attr-defined]
+                    await _tw(
+                        thermo_mod.cmd_read_storage_time(index),
+                        f"nt100b_time[{index}]",
+                    )
+                    await asyncio.sleep(0.28)
+                    await _tw(
+                        thermo_mod.cmd_read_storage_result(index),
+                        f"nt100b_result[{index}]",
+                    )
+                    await asyncio.sleep(0.28)
+                n_temp = sum(
+                    1
+                    for r in self.readings
+                    if getattr(r, "object_temperature", None) is not None
+                )
+                log.info(
+                    "[POST-MEASURE] NT-100B dump done — %d temperature(s) "
+                    "(display may already be off; data was on-device)",
+                    n_temp,
+                )
+            except BleakError as exc:
+                log.warning(
+                    "Nipro NT-100B TICD pull failed (will still listen HTP): %s",
+                    exc,
+                )
+                _log_winrt(exc, operation="nt100b_ticd_pull")
+            return
+
+        # --- Nipro CF / Cocoron glucose ---------------------------------------
+        if pid == "nipro_cf":
+            log.info(
+                "Nipro CF: companion path — clock + RACP number/report (All mode)"
             )
             try:
-                import time as _time
-
                 await self._write_bytes(
-                    self.profile.write_uuid,
-                    mightysat_mod.cmd_set_clock(int(_time.time())),
-                    response=False,
-                    label="mightysat_set_clock",
+                    nipro_cf_mod.CHAR_CURRENT_TIME,
+                    nipro_cf_mod.encode_cf_clock(),
+                    response=True,
+                    label="nipro_cf_clock",
                 )
-                await asyncio.sleep(0.15)
+            except BleakError as exc:
+                log.warning("Nipro CF clock write failed (continuing): %s", exc)
+                _log_winrt(exc, operation="nipro_cf_clock")
+            await asyncio.sleep(0.2)
+            racp = self.profile.write_uuid or nipro_cf_mod.CHAR_RACP
+            try:
+                await self._write_bytes(
+                    racp,
+                    nipro_cf_mod.racp_number_of_records_all(),
+                    response=True,
+                    label="nipro_cf_racp_count",
+                )
+                await asyncio.sleep(0.4)
+                await self._write_bytes(
+                    racp,
+                    nipro_cf_mod.racp_report_all(),
+                    response=True,
+                    label="nipro_cf_racp_report_all",
+                )
+            except BleakError as exc:
+                log.error("Nipro CF RACP failed: %s", exc)
+                _log_winrt(exc, operation="nipro_cf_racp")
+            return
+
+        if pid == "mightysat" and self.profile.write_uuid:
+            # Companion: notify already on → GetInfo → (on rsp) SetClock ticks →
+            # (on ACK) EnableStream from device-info[3:6]
+            log.info(
+                "MightySat: companion order GetInfo → SetClock(ticks) → "
+                "EnableStream(from info)…"
+            )
+            try:
+                self._mightysat_device_info: Optional[bytes] = None
                 await self._write_bytes(
                     self.profile.write_uuid,
                     mightysat_mod.cmd_get_device_info(),
                     response=False,
                     label="mightysat_get_info",
                 )
-                await asyncio.sleep(0.2)
+                # Wait briefly for device_info notify into parser/readings
+                await asyncio.sleep(0.45)
+                info_payload: Optional[bytes] = None
+                for r in reversed(self.readings):
+                    if isinstance(r, dict) and r.get("type") == "device_info":
+                        # reconstruct minimal payload from parse_device_info fields
+                        # Prefer raw from raw_payloads last matching 0x01
+                        break
+                for rp in reversed(self.raw_payloads):
+                    raw = bytes(getattr(rp, "data", b"") or b"")
+                    # deframe if needed
+                    try:
+                        if raw and raw[0] == 0x77:
+                            fr = mightysat_mod.deframe(raw)
+                            if fr.payload and fr.payload[0] == 0x01:
+                                info_payload = fr.payload
+                                break
+                        elif raw and raw[0] == 0x01:
+                            info_payload = raw
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+
                 await self._write_bytes(
                     self.profile.write_uuid,
-                    mightysat_mod.cmd_configure_streaming(),
+                    mightysat_mod.cmd_set_clock_dotnet_ticks(),
                     response=False,
-                    label="mightysat_stream",
+                    label="mightysat_set_clock_ticks",
                 )
-                log.info(
-                    "MightySat streaming armed. History: use cmd_get_trend_record "
-                    "after device_info session ids (parser returns trend_record dicts)."
+                await asyncio.sleep(0.25)
+                if info_payload:
+                    stream_cmd = mightysat_mod.cmd_enable_stream_from_device_info(
+                        info_payload
+                    )
+                    label = "mightysat_enable_stream_from_info"
+                else:
+                    stream_cmd = mightysat_mod.cmd_configure_streaming()
+                    label = "mightysat_configure_streaming_fallback"
+                    log.warning(
+                        "MightySat: no device_info yet — fallback ConfigureStreaming"
+                    )
+                await self._write_bytes(
+                    self.profile.write_uuid,
+                    stream_cmd,
+                    response=False,
+                    label=label,
                 )
+                log.info("MightySat streaming armed (companion-like).")
             except BleakError as exc:
                 log.error("MightySat setup write failed: %s", exc)
                 _log_winrt(exc, operation="mightysat_write")
 
         if pid == "thermometer":
-            # NT-100B / TICD (Nipro pack): BLE is usually OFF until a measurement
-            # completes, then advertises ~1–2 minutes. Operator must Sync in that window.
+            # Lab full TICD history. Prefer profile nipro_nt100b for normal Sync
+            # (latest slot only + HTP). Kept for RE / bulk dump.
             wu = self._resolved_write_uuid or self.profile.write_uuid
             if not wu:
                 log.error(
@@ -1102,8 +1442,8 @@ class MedicalBleClient:
                 )
             else:
                 log.info(
-                    "Thermometer NT-100B: dual-wake → clock → count → history "
-                    "(TICD v1.16) via %s  [BLE window ~2 min after measure]",
+                    "Thermometer LAB: full TICD history via %s "
+                    "(for normal Sync use profile nipro_nt100b)",
                     wu,
                 )
 
@@ -1119,22 +1459,19 @@ class MedicalBleClient:
                         )
 
                 try:
-                    # 1-2: two cmds within 10s enter communication mode (doc)
                     wake = thermo_mod.cmd_wakeup_pair()
                     await _tw(wake, "thermo_wake1")
                     await asyncio.sleep(0.55)
                     await _tw(wake, "thermo_wake2")
-                    await asyncio.sleep(0.7)  # allow unsolicited 0x54 enter-comm
+                    await asyncio.sleep(0.7)
 
-                    # 3: clock (helps storage timestamps)
                     await _tw(thermo_mod.cmd_write_clock(), "thermo_write_clock")
                     await asyncio.sleep(0.35)
 
-                    # 4: storage count 0x2B — drives how many 0x25/0x26 pairs to pull
                     await _tw(thermo_mod.cmd_read_storage_count(), "thermo_count")
                     await asyncio.sleep(0.6)
 
-                    count = 1  # always try at least latest slot (index 0)
+                    count = 1
                     for r in self.readings:
                         if isinstance(r, dict) and r.get("type") == "storage_count":
                             try:
@@ -1143,25 +1480,17 @@ class MedicalBleClient:
                                 count = 1
                             break
                     if count <= 0:
-                        log.warning(
-                            "Thermometer storage_count=0 or missing — still polling "
-                            "index 0 (latest). Device may have empty memory."
-                        )
                         count = 1
-                    # Cap for session time (2 min BLE window)
-                    max_hist = min(count, 20)
+                    # Lab default: latest 5 only (was 20 — slow and floods UI)
+                    max_hist = min(count, 5)
                     log.info(
-                        "Thermometer: pulling %d history slot(s) (count=%s)",
+                        "Thermometer LAB: pulling %d history slot(s) (count=%s)",
                         max_hist,
                         count,
                     )
 
                     for index in range(max_hist):
                         if not self._client or not self._client.is_connected:
-                            log.warning(
-                                "Thermometer disconnected mid-history at index %d",
-                                index,
-                            )
                             break
                         if hasattr(self._parser, "set_history_index"):
                             self._parser.set_history_index(index)  # type: ignore[attr-defined]
@@ -1176,23 +1505,8 @@ class MedicalBleClient:
                         )
                         await asyncio.sleep(0.35)
 
-                    # Optional live IR measure (0x41) if no temperature yet
-                    n_temp = sum(
-                        1
-                        for r in self.readings
-                        if getattr(r, "object_temperature", None) is not None
-                    )
-                    if n_temp == 0 and self._client and self._client.is_connected:
-                        log.info(
-                            "Thermometer: no storage temps yet — trying 0x41 start measure"
-                        )
-                        await _tw(thermo_mod.cmd_start_measure(), "thermo_start_measure")
-                        await asyncio.sleep(0.8)
-
                     log.info(
-                        "Thermometer poll done: readings_buf=%d (temps will show as "
-                        "ThermometerReading). Keep device awake; BLE often ends ~2 min "
-                        "after the measurement that turned advertising on.",
+                        "Thermometer LAB poll done: readings_buf=%d",
                         len(self.readings),
                     )
                 except BleakError as exc:
@@ -1327,6 +1641,22 @@ class MedicalBleClient:
         # A&D can space multi-record Indications; 4s cut dump to 1 reading often
         if quiet_timeout is None and self.profile.id == "and_ua651":
             quiet_timeout = 12.0
+        # Nipro companion BP: multi-record dump; allow spacing like A&D
+        if quiet_timeout is None and self.profile.id in ("nipro_nbp", "nipro_nmbp"):
+            quiet_timeout = 8.0
+        # Nipro HT: single reading; NT-100B may already have temp from TICD pull
+        if quiet_timeout is None and self.profile.id == "nipro_nsm1":
+            quiet_timeout = 6.0
+        if quiet_timeout is None and self.profile.id == "nipro_nt100b":
+            # If TICD already returned a temp, end soon; else wait for HTP/TICD
+            has_temp = any(
+                getattr(r, "object_temperature", None) is not None
+                for r in self.readings
+            )
+            quiet_timeout = 2.5 if has_temp else 12.0
+        # Nipro CF: history may stream then go quiet
+        if quiet_timeout is None and self.profile.id == "nipro_cf":
+            quiet_timeout = 10.0
         # MightySat / streams: never quiet-end (0.0 forced from run())
         if quiet_timeout == 0.0:
             quiet_timeout = None
@@ -1352,6 +1682,21 @@ class MedicalBleClient:
                 if now >= deadline:
                     log.info("Listen max duration reached")
                     break
+                # NT-100B: if post-connect TICD already delivered a temp, finish
+                if (
+                    self.profile.id == "nipro_nt100b"
+                    and any(
+                        getattr(r, "object_temperature", None) is not None
+                        for r in self.readings
+                    )
+                    and self._last_notif_mono is not None
+                    and (now - self._last_notif_mono) >= (quiet_timeout or 2.5)
+                ):
+                    log.info(
+                        "Nipro NT-100B: have temperature + quiet %.1fs — ending listen",
+                        quiet_timeout or 2.5,
+                    )
+                    break
                 if (
                     quiet_timeout is not None
                     and self._last_notif_mono is not None
@@ -1368,12 +1713,96 @@ class MedicalBleClient:
                     break
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
-            log.info("Listen cancelled")
+            # Web/HTTP cancel often aborts listen mid-session. Keep any data
+            # already collected (TICD dump / HTP) instead of failing the job.
+            n = sum(
+                1
+                for r in self.readings
+                if getattr(r, "object_temperature", None) is not None
+                or getattr(r, "systolic", None) is not None
+            )
+            log.info(
+                "Listen cancelled — keeping %d reading(s) / %d raw already collected",
+                len(self.readings),
+                len(self.raw_payloads),
+            )
+            if n > 0 or self.readings or self.raw_payloads:
+                return
             raise
+
+    async def run_pre_disconnect_teardown(self) -> None:
+        """Companion teardown writes (e.g. NT-100B power-off) before GATT drop."""
+        if not self._client:
+            return
+        try:
+            still_up = bool(self._client.is_connected)
+        except Exception:  # noqa: BLE001
+            still_up = False
+        if not still_up:
+            log.debug("teardown skip — link already down")
+            return
+        pid = self.profile.id
+        if pid in ("nipro_nt100b", "thermometer"):
+            wu = self._resolved_write_uuid
+            if not wu:
+                # Re-resolve from live GATT (profile UUID may not match after rediscovery)
+                for _svc, ch in self._iter_gatt_chars():
+                    props = [p.lower() for p in (ch.properties or [])]
+                    uid = str(ch.uuid).lower().replace("-", "")
+                    if "1524" in uid and (
+                        "write" in props or "write-without-response" in props
+                    ):
+                        wu = str(ch.uuid)
+                        break
+            if not wu:
+                wu = self.profile.write_uuid or nipro_mod.NT100B_CUSTOM_CHAR
+            try:
+                log.info(
+                    "Nipro NT-100B: TICD power-off via %s (best-effort)",
+                    wu,
+                )
+                # Prefer write-without-response — less likely to fail if link is dying
+                try:
+                    await self._write_bytes(
+                        wu,
+                        thermo_mod.cmd_power_off(),
+                        response=False,
+                        label="nipro_nt100b_power_off",
+                    )
+                except BleakError:
+                    await self._write_bytes(
+                        wu,
+                        thermo_mod.cmd_power_off(),
+                        response=True,
+                        label="nipro_nt100b_power_off_rsp",
+                    )
+                await asyncio.sleep(min(0.4, nipro_mod.NT100B_POST_POWEROFF_DELAY_S))
+            except Exception as exc:  # noqa: BLE001
+                # Non-fatal: device often disconnects itself after dump
+                log.info(
+                    "Nipro NT-100B power-off skipped (%s) — data already collected is kept",
+                    exc,
+                )
+        if pid == "nipro_cf" and hasattr(self._parser, "flush_pending"):
+            try:
+                flushed = self._parser.flush_pending()  # type: ignore[attr-defined]
+                for rec in flushed or []:
+                    if rec not in self.readings:
+                        self.readings.append(rec)
+                        log.info("[NIPRO CF] flushed pending: %s", _brief(rec))
+            except Exception as exc:  # noqa: BLE001
+                log.debug("Nipro CF flush_pending: %s", exc)
+        # brief settle for Nipro BP/HT like companion
+        if pid.startswith("nipro_"):
+            await asyncio.sleep(nipro_mod.POST_DISCONNECT_SETTLE_S)
 
     async def disconnect(self) -> None:
         if not self._client:
             return
+        try:
+            await self.run_pre_disconnect_teardown()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("pre-disconnect teardown: %s", exc)
         for uuid in list(self._subscribed):
             try:
                 await self._client.stop_notify(uuid)
@@ -1409,6 +1838,30 @@ class MedicalBleClient:
         # Streaming profiles must not inherit BP quiet-end from a prior default
         if quiet_timeout is None and self.profile.id in ("mightysat",):
             quiet_timeout = 0.0  # sentinel: listen() treats 0 as "off"
+        # Post-measure defaults (Omron-like windows for Nipro)
+        try:
+            from .nipro import post_measure as pm
+
+            pid = self.profile.id
+            if self.find_timeout <= 0 and (
+                pid.startswith("nipro_") or pid in ("mightysat", "thermometer")
+            ):
+                self.find_timeout = pm.find_window_for(pid)
+                log.info(
+                    "[POST-MEASURE] auto find_window=%.0fs for %s",
+                    self.find_timeout,
+                    pid,
+                )
+            if quiet_timeout is None:
+                q = pm.quiet_s_for(pid)
+                if q is not None:
+                    quiet_timeout = q
+            # Prefer longer receive when caller left default 60
+            if duration <= 60.0 and pid.startswith("nipro_"):
+                duration = max(duration, pm.receive_s_for(pid))
+        except Exception:  # noqa: BLE001
+            pass
+
         err: Optional[BaseException] = None
         try:
             await self.connect(timeout=connect_timeout)
@@ -1417,6 +1870,15 @@ class MedicalBleClient:
             # 0.0 means disable quiet-end (continuous stream)
             qt = None if quiet_timeout == 0.0 else quiet_timeout
             await self.listen(duration=duration, quiet_timeout=qt)
+        except asyncio.CancelledError:
+            # UI/HTTP cancelled mid-listen — still return dump already done in setup
+            log.warning(
+                "Session cancelled — returning %d reading(s) collected so far",
+                len(self.readings),
+            )
+            err = None  # treat as soft cancel if we have data
+            if raise_on_error and not self.readings:
+                raise
         except (BleakError, asyncio.TimeoutError, OSError) as exc:
             err = exc
             log.error(
@@ -1435,7 +1897,10 @@ class MedicalBleClient:
             _log_winrt(exc, operation="session/unexpected")
             log.debug("traceback:\n%s", traceback.format_exc())
         finally:
-            await self.disconnect()
+            try:
+                await self.disconnect()
+            except Exception as disc_exc:  # noqa: BLE001
+                log.debug("disconnect after session: %s", disc_exc)
         log.info(
             "Session done. readings=%d raw_payloads=%d  ts=%s",
             len(self.readings),
@@ -1452,8 +1917,16 @@ def _brief(result: Any) -> str:
         d = result.to_dict()
         # Compact clinical summary
         keys = (
-            "systolic", "diastolic", "pulse_rate", "spo2",
-            "object_temperature", "blood_glucose_mg_dl", "type", "message_id",
+            "systolic",
+            "diastolic",
+            "pulse_rate",
+            "spo2",
+            "object_temperature",
+            "blood_glucose_mg_dl",
+            "concentration",
+            "sequence",
+            "type",
+            "message_id",
         )
         parts = [f"{k}={d[k]}" for k in keys if k in d and d[k] is not None]
         if not parts:
@@ -1516,7 +1989,13 @@ async def _async_connect_main(args: argparse.Namespace) -> int:
 
     pair = args.pair
     if args.pair is None:
-        pair = profile.id in ("beurer_bm54", "and_ua651", "hem7143t1", "omron") and is_windows()
+        pair = profile.id in (
+            "beurer_bm54",
+            "and_ua651",
+            "hem7143t1",
+            "omron",
+            "nipro_nmbp",
+        ) and is_windows()
         if pair:
             log.info(
                 "[WINRT] Auto-enabling --pair for profile %s on Windows "
@@ -1524,14 +2003,32 @@ async def _async_connect_main(args: argparse.Namespace) -> int:
                 profile.id,
             )
 
+    # Omron-like post-measure hunt for Nipro (disable with --find-timeout 0)
+    find_to = float(getattr(args, "find_timeout", -1))
+    if find_to < 0:
+        # default: auto window for Nipro profiles
+        if profile.id.startswith("nipro_") or profile.id in ("mightysat", "thermometer"):
+            from .nipro import post_measure as pm
+
+            find_to = pm.find_window_for(profile.id)
+        else:
+            find_to = 0.0
+
     client = MedicalBleClient(
         address=args.address,
         profile=profile,
         auto_dispatch=args.auto_parse,
         pair=bool(pair),
-        connect_retries=args.retries,
+        connect_retries=max(args.retries, 4 if find_to > 0 else 2),
+        find_timeout=find_to,
+        name_hint=str(getattr(args, "device_name", "") or ""),
     )
-    await client.run(duration=args.duration, connect_timeout=args.connect_timeout)
+    dur = float(args.duration)
+    if profile.id.startswith("nipro_") and dur <= 60:
+        from .nipro import post_measure as pm
+
+        dur = max(dur, pm.receive_s_for(profile.id))
+    await client.run(duration=dur, connect_timeout=args.connect_timeout)
 
     if client.readings:
         log.info("--- PARSED READINGS SUMMARY ---")
@@ -1633,6 +2130,8 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     if getattr(args, "command", None) == "omron":
         return await _async_omron_main(args)
+    if getattr(args, "command", None) == "nipro":
+        return await _async_nipro_main(args)
     return await _async_connect_main(args)
 
 
@@ -1661,7 +2160,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         sp.add_argument(
             "--profile",
             default=None,
-            help="beurer_bm54 | and_ua651 | mightysat | thermometer | fora6 | omron | re_generic",
+            help=(
+                "beurer_bm54 | and_ua651 | nipro_nbp | nipro_nmbp | nipro_nsm1 | "
+                "nipro_nt100b | nipro_cf | mightysat | thermometer | fora6 | omron"
+            ),
         )
         sp.add_argument("--address", "-a", default=None, help="BLE MAC / address")
         sp.add_argument("--scan", action="store_true")
@@ -1673,6 +2175,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         sp.add_argument("--no-pair", dest="pair", action="store_false")
         sp.add_argument("--auto-parse", action="store_true")
         sp.add_argument("--list-profiles", action="store_true")
+        sp.add_argument(
+            "--find-timeout",
+            type=float,
+            default=-1.0,
+            help=(
+                "Post-measure hunt seconds (Omron-like). Default auto for Nipro "
+                "(~90–150s). Use 0 to disable (connect once only)."
+            ),
+        )
+        sp.add_argument(
+            "--device-name",
+            default="",
+            help="Advertised name hint while hunting (optional)",
+        )
 
     connect_p = sub.add_parser(
         "connect",
@@ -1710,9 +2226,234 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     read_p.add_argument("--retries", type=int, default=3)
 
+    # ---- Nipro げんきノート (pair registry + hands-free) ----
+    nipro_p = sub.add_parser(
+        "nipro",
+        help="Nipro げんきノート: pair registry + hands-free wait (companion-like)",
+    )
+    nipro_sub = nipro_p.add_subparsers(dest="nipro_cmd", required=True)
+
+    nipro_sub.add_parser("list", help="List paired Nipro meters (local registry)")
+
+    n_pair = nipro_sub.add_parser(
+        "pair",
+        help="Register a meter (optionally scan/connect to fill name+serial)",
+    )
+    n_pair.add_argument(
+        "-p",
+        "--profile",
+        default=None,
+        help="nipro_nbp | nipro_nmbp | nipro_nsm1 | nipro_nt100b | nipro_cf | mightysat",
+    )
+    n_pair.add_argument("-a", "--address", default=None, help="BLE MAC / address")
+    n_pair.add_argument("--name", default=None, help="Exact advertised name (required if offline)")
+    n_pair.add_argument("--serial", default="", help="Serial number (optional)")
+    n_pair.add_argument("--scan", action="store_true", help="Scan and pick by address/name")
+    n_pair.add_argument("--scan-timeout", type=float, default=12.0)
+    n_pair.add_argument(
+        "--connect-serial",
+        action="store_true",
+        help="Connect once and try DIS serial read before saving",
+    )
+
+    n_unpair = nipro_sub.add_parser("unpair", help="Remove from local registry")
+    n_unpair.add_argument("-a", "--address", default=None)
+    n_unpair.add_argument("--name", default=None)
+    n_unpair.add_argument(
+        "--category",
+        default=None,
+        help="bp | ht | gl | spo2 | bc",
+    )
+
+    n_wait = nipro_sub.add_parser(
+        "wait",
+        help="Hands-free wait: scan paired names → sync 60s → loop (like companion)",
+    )
+    n_wait.add_argument(
+        "-t",
+        "--duration",
+        type=float,
+        default=3600.0,
+        help="Total wait seconds (default 3600; companion home uses ~8h)",
+    )
+    n_wait.add_argument(
+        "--receive-timeout",
+        type=float,
+        default=60.0,
+        help="Per-session receive timeout (companion 60s)",
+    )
+    n_wait.add_argument(
+        "--scan-chunk",
+        type=float,
+        default=12.0,
+        help="Scan window seconds per chunk",
+    )
+    n_wait.add_argument(
+        "--categories",
+        default="bp,ht,gl,spo2",
+        help="Comma categories to wait for (default bp,ht,gl,spo2; home app omits bc)",
+    )
+    n_wait.add_argument("--pair", dest="pair", action="store_true", default=None)
+    n_wait.add_argument("--no-pair", dest="pair", action="store_false")
+
     # Flat flags for backward compatibility when no subcommand is used
     _add_connect_args(p)
     return p
+
+
+async def _async_nipro_main(args: argparse.Namespace) -> int:
+    """Nipro pair registry + hands-free wait."""
+    from .nipro import registry as reg
+    from .nipro.handsfree import handsfree_wait
+
+    cmd = getattr(args, "nipro_cmd", None)
+
+    if cmd == "list":
+        meters = reg.list_meters()
+        if not meters:
+            log.info("[NIPRO] no paired meters (cwd: nipro_paired_devices.json)")
+            return 0
+        log.info("[NIPRO] %d paired meter(s):", len(meters))
+        for m in meters:
+            log.info(
+                "  %-16s  %-12s  profile=%-14s  id=%s  serial=%s  addr=%s",
+                m.name,
+                m.category,
+                m.profile_id,
+                m.id_nodash,
+                m.serial or "-",
+                m.address or "-",
+            )
+        return 0
+
+    if cmd == "unpair":
+        n = reg.delete_meter(
+            device_id=args.address,
+            category=args.category,
+            name=args.name,
+        )
+        log.info("[NIPRO] removed %d entr(y/ies)", n)
+        return 0 if n else 1
+
+    if cmd == "pair":
+        address = args.address
+        name = args.name
+        profile_id = args.profile
+        serial = args.serial or ""
+
+        if args.scan or not address or not name:
+            log.info("[NIPRO] scanning for meters…")
+            try:
+                devices = await scan_devices(profile=None, timeout=args.scan_timeout)
+            except (BleakError, OSError, asyncio.TimeoutError) as exc:
+                _log_winrt(exc, operation="nipro_scan")
+                return 2
+            # Prefer address match, else name prefix / profile hints
+            picked = None
+            for d in devices:
+                dname = (d.name or "").strip()
+                daddr = d.address or ""
+                if address and daddr.upper() == address.upper():
+                    picked = d
+                    break
+                if name and dname == name.strip():
+                    picked = d
+                    break
+            if picked is None and profile_id:
+                try:
+                    prof = get_profile(profile_id)
+                    for d in devices:
+                        dname = (d.name or "").lower()
+                        if any(h.lower() in dname for h in prof.name_hints):
+                            picked = d
+                            break
+                except KeyError:
+                    pass
+            if picked is None and devices:
+                # first device that maps to a Nipro profile
+                for d in devices:
+                    if reg.infer_profile_from_name(d.name or ""):
+                        picked = d
+                        break
+            if picked is None:
+                log.error(
+                    "[NIPRO] no matching device found. Advertise the meter and retry "
+                    "with -a <MAC> and --name '<exact adv name>'."
+                )
+                for d in devices[:15]:
+                    log.info("  seen: %s  %s", d.address, d.name)
+                return 2
+            address = picked.address
+            name = (picked.name or name or "").strip()
+            log.info("[NIPRO] selected %s  %s", address, name)
+
+        if not name:
+            log.error("[NIPRO] pair requires --name (exact advertised name)")
+            return 2
+        if not address:
+            log.error("[NIPRO] pair requires -a/--address")
+            return 2
+        if not profile_id:
+            profile_id = reg.infer_profile_from_name(name)
+        if not profile_id:
+            log.error(
+                "[NIPRO] could not infer profile from name %r — pass -p nipro_nbp|…",
+                name,
+            )
+            return 2
+
+        if args.connect_serial:
+            try:
+                prof = get_profile(profile_id)
+                client = MedicalBleClient(
+                    profile=prof,
+                    address=address,
+                    pair=is_windows() and profile_id in ("nipro_nmbp", "and_ua651"),
+                )
+                await client.connect(timeout=30.0)
+                await client._read_device_information()
+                # serial may only be in logs; optional future: capture DIS
+                await client.disconnect()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[NIPRO] connect-serial optional path failed: %s", exc)
+
+        try:
+            meter = reg.register_meter(
+                device_id=address,
+                name=name,
+                profile_id=profile_id,
+                serial=serial,
+                address=address,
+            )
+        except ValueError as exc:
+            log.error("[NIPRO] pair failed: %s", exc)
+            return 2
+        log.info(
+            "[NIPRO] paired OK — hands-free: python -m medical_ble_toolkit nipro wait"
+        )
+        log.info(
+            "  name=%s category=%s profile=%s id=%s",
+            meter.name,
+            meter.category,
+            meter.profile_id,
+            meter.id_nodash,
+        )
+        return 0
+
+    if cmd == "wait":
+        cats = [c.strip() for c in (args.categories or "").split(",") if c.strip()]
+        readings = await handsfree_wait(
+            duration=float(args.duration),
+            receive_timeout=float(args.receive_timeout),
+            scan_chunk=float(args.scan_chunk),
+            categories=cats or None,
+            pair_on_connect=args.pair,
+        )
+        log.info("[NIPRO] hands-free collected %d reading(s)", len(readings))
+        return 0
+
+    log.error("Unknown nipro command: %s", cmd)
+    return 2
 
 
 def _has_direct_flags(argv: List[str]) -> bool:
@@ -1730,6 +2471,7 @@ def _has_direct_flags(argv: List[str]) -> bool:
         "-t",
         "connect",
         "omron",
+        "nipro",
     )
     return any(a in markers or a.startswith("--profile=") for a in argv)
 

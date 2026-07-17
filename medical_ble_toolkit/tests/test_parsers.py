@@ -56,6 +56,26 @@ from medical_ble_toolkit.parsers.and_ua651 import (
     parse_custom_response,
 )
 from medical_ble_toolkit.parsers.htp import parse_temperature_measurement, decode_float_11073
+from medical_ble_toolkit.parsers.nipro_cf import (
+    encode_cf_clock,
+    racp_number_of_records_all,
+    racp_report_all,
+    racp_report_from_seq,
+    parse_cf_measurement,
+    NiproCfParser,
+)
+from medical_ble_toolkit.parsers.nipro_common import (
+    encode_date_time_2a08 as nipro_dt,
+    is_invalid_bp_companion,
+)
+from medical_ble_toolkit.parsers.mightysat import (
+    cmd_set_clock_dotnet_ticks,
+    cmd_enable_stream_from_device_info,
+    cmd_get_device_info,
+)
+from medical_ble_toolkit.parsers.thermometer import cmd_power_off
+from medical_ble_toolkit.profiles import get_profile
+from medical_ble_toolkit.parser import get_parser
 from medical_ble_toolkit.models import DeviceBrand, ParseError, PressureUnit
 
 
@@ -371,6 +391,129 @@ class TestHtp(unittest.TestCase):
         r = parse_temperature_measurement(payload)
         self.assertAlmostEqual(r.object_temperature, 36.5, places=2)
         self.assertEqual(r.model, "HTP")
+
+
+class TestNiproCompanion(unittest.TestCase):
+    """げんきノート BLELib parity helpers."""
+
+    def test_profiles_resolve(self):
+        for pid in (
+            "nipro_nbp",
+            "nipro_nmbp",
+            "nipro_nsm1",
+            "nipro_nt100b",
+            "nipro_cf",
+            "nt100b",
+            "nbp",
+            "cocoron",
+        ):
+            p = get_profile(pid)
+            self.assertTrue(p.id.startswith("nipro_") or p.id == "nipro_nt100b")
+            get_parser(p.parser_key)  # must construct
+
+    def test_nt100b_alias_is_companion_not_ticd(self):
+        p = get_profile("nt100b")
+        self.assertEqual(p.id, "nipro_nt100b")
+        self.assertEqual(p.parser_key, "nipro_nt100b")
+
+    def test_bp_clock_and_power_off(self):
+        raw = nipro_dt(datetime(2026, 7, 16, 14, 30, 5))
+        self.assertEqual(raw, bytes([0xEA, 0x07, 0x07, 0x10, 0x0E, 0x1E, 0x05]))
+        po = cmd_power_off()
+        self.assertEqual(list(po), [0x51, 0x50, 0x00, 0x00, 0x00, 0x00, 0xA3, 0x44])
+
+    def test_cf_racp_and_clock(self):
+        self.assertEqual(list(racp_number_of_records_all()), [0x04, 0x01])
+        self.assertEqual(list(racp_report_all()), [0x01, 0x01])
+        self.assertEqual(list(racp_report_from_seq(12)), [0x01, 0x03, 0x01, 0x0C, 0x00])
+        clk = encode_cf_clock(datetime(2026, 7, 16, 10, 0, 0))
+        self.assertEqual(len(clk), 7)
+        self.assertEqual(clk[0], 0xEA)
+        self.assertEqual(clk[1], 0x07)
+
+    def test_cf_measurement_parse(self):
+        # seq=5, date 2026-07-16 08:00:00, sfloat 0.0012 kg/L → *1e5 = 120 mg/dL
+        from medical_ble_toolkit.common.sfloat import encode_sfloat
+
+        sfloat = encode_sfloat(0.0012, exponent=-4)  # mant 12, exp -4
+        payload = bytearray(15)
+        payload[1] = 5
+        payload[2] = 0
+        payload[3] = 0xEA
+        payload[4] = 0x07
+        payload[5] = 7
+        payload[6] = 16
+        payload[7] = 8
+        payload[8] = 0
+        payload[9] = 0
+        payload[12] = sfloat[0]
+        payload[13] = sfloat[1]
+        payload[14] = 0x00
+        rec = parse_cf_measurement(payload)
+        self.assertEqual(rec.sequence, 5)
+        self.assertEqual(rec.measured_at.year, 2026)
+        self.assertFalse(rec.is_control_solution)
+        self.assertAlmostEqual(rec.concentration_mg_dl or 0, 120.0, places=0)
+
+    def test_cf_control_solution_skipped_flag(self):
+        from medical_ble_toolkit.common.sfloat import encode_sfloat
+
+        sfloat = encode_sfloat(0.0012, exponent=-4)
+        payload = bytearray(15)
+        payload[1] = 1
+        payload[3] = 0xEA
+        payload[4] = 0x07
+        payload[5] = 1
+        payload[6] = 1
+        payload[12] = sfloat[0]
+        payload[13] = sfloat[1]
+        payload[14] = 0x0A
+        rec = parse_cf_measurement(payload)
+        self.assertTrue(rec.is_control_solution)
+
+    def test_mightysat_companion_cmds(self):
+        info = cmd_get_device_info()
+        self.assertEqual(list(info), [0x77, 0x02, 0x01, 0x07])
+        ticks = cmd_set_clock_dotnet_ticks(datetime(2020, 1, 1))
+        self.assertEqual(ticks[0], 0x77)
+        self.assertEqual(ticks[2], 0x02)
+        # EnableStream from synthetic device info
+        dev = bytes([0x01, 0, 0, 0x1F, 0x00, 0x03] + [0] * 13)
+        stream = cmd_enable_stream_from_device_info(dev)
+        self.assertEqual(stream[2], 0x03)
+        self.assertEqual(list(stream[3:6]), [0x1F, 0x00, 0x03])
+
+    def test_bp_sentinel(self):
+        self.assertTrue(
+            is_invalid_bp_companion(2047.0, 80.0, 70.0, datetime.now())
+        )
+        self.assertFalse(
+            is_invalid_bp_companion(120.0, 80.0, 70.0, datetime.now())
+        )
+
+    def test_nt100b_htp_companion_style(self):
+        from medical_ble_toolkit.parsers.nipro_nt100b import (
+            parse_htp_companion_style,
+            Nt100bCompanionParser,
+        )
+
+        # FLOAT 36.5°C: mant 365 exp -1 → 6D 01 00 FF
+        # Companion: SFLOAT(6D,01)=365 * 10^(-1) = 36.5
+        payload = bytes(
+            [0x02]  # flags timestamp
+            + [0x6D, 0x01, 0x00, 0xFF]
+            + [0xEA, 0x07, 7, 16, 12, 0, 0]  # pad to >=12
+        )
+        r = parse_htp_companion_style(payload)
+        self.assertAlmostEqual(r.object_temperature, 36.5, places=1)
+        self.assertEqual(r.model, "NT-100B")
+
+        p = Nt100bCompanionParser()
+        self.assertTrue(
+            p.can_parse(payload, "00002a1c-0000-1000-8000-00805f9b34fb")
+        )
+        r2 = p.parse(payload, "00002a1c-0000-1000-8000-00805f9b34fb")
+        self.assertAlmostEqual(r2.object_temperature, 36.5, places=1)
 
 
 if __name__ == "__main__":

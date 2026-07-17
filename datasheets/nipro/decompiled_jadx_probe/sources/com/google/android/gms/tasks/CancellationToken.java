@@ -1,0 +1,13 @@
+package com.google.android.gms.tasks;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.RecentlyNonNull;
+
+/* compiled from: com.google.android.gms:play-services-tasks@@17.2.1 */
+/* loaded from: classes.dex */
+public abstract class CancellationToken {
+    public abstract boolean isCancellationRequested();
+
+    @NonNull
+    public abstract CancellationToken onCanceledRequested(@RecentlyNonNull OnTokenCanceledListener onTokenCanceledListener);
+}

@@ -36,7 +36,22 @@ from .parsers.beurer_po60 import BeurerPo60Parser
 from .parsers.beurer_scale import BeurerScaleParser
 from .parsers.beurer_tracker import BeurerTrackerParser
 from .parsers.beurer_ecg import BeurerEcgParser
+from .parsers.htp import HtpTemperatureParser
+from .parsers.nipro_cf import NiproCfParser
+from .parsers.nipro_nt100b import Nt100bCompanionParser
 from .parsers.base import parse_dispatch
+
+
+def _nipro_bp_parser():
+    return BlpBloodPressureParser(brand=DeviceBrand.AND, model="Nipro BP")
+
+
+def _nipro_htp_parser():
+    return HtpTemperatureParser()
+
+
+def _nipro_nt100b_parser():
+    return Nt100bCompanionParser()
 
 
 # Profile name → parser factory
@@ -70,10 +85,20 @@ _PROFILE_PARSERS: Dict[str, Callable[[], Any]] = {
     "and_ua651": and_ua651ble_parser,
     "ua651": and_ua651ble_parser,
     "ua-651ble": and_ua651ble_parser,
+    "nipro_nbp": _nipro_bp_parser,
+    "nipronbp": _nipro_bp_parser,
+    "nipro_nmbp": _nipro_bp_parser,
+    "nipronmbp": _nipro_bp_parser,
+    "nipro_nsm1": _nipro_htp_parser,
+    "nipronsm1": _nipro_htp_parser,
+    "nipro_nt100b": _nipro_nt100b_parser,
+    "nipront100b": _nipro_nt100b_parser,
+    "nipro_cf": lambda: NiproCfParser(),
+    "niprocf": lambda: NiproCfParser(),
     "mightysat": lambda: MightySatParser(),
     "masimo": lambda: MightySatParser(),
     "thermometer": lambda: ThermometerParser(),
-    "nt100b": lambda: ThermometerParser(),
+    "nt100b": _nipro_nt100b_parser,
     "fora": lambda: ForaParser(),
     "fora6": lambda: ForaParser(),
     # Omron EEPROM slot parsers (model-specific layout via omron_bp catalog)

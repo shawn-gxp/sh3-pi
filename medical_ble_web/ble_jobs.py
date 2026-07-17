@@ -16,7 +16,7 @@ _EXPERIMENTS = Path(__file__).resolve().parent.parent
 if str(_EXPERIMENTS) not in sys.path:
     sys.path.insert(0, str(_EXPERIMENTS))
 
-from brands import get_brand  # noqa: E402
+from brands import get_brand, resolve_profile_id  # noqa: E402
 import db  # noqa: E402
 
 log = logging.getLogger("medical_ble_web.ble")
@@ -133,10 +133,22 @@ def _reading_to_row(obj: Any, brand: str) -> Dict[str, Any]:
             d.get("object_temperature", d.get("temperature"))
         )
         row["pulse_rate"] = _f(d.get("pulse_rate"))
-    elif d.get("blood_glucose_mg_dl") is not None:
+    elif d.get("blood_glucose_mg_dl") is not None or d.get("concentration") is not None:
         row["reading_type"] = "glucose"
-        row["glucose_mg_dl"] = _f(d.get("blood_glucose_mg_dl"))
-    elif d.get("type") in ("ack", "nack", "device_info", "raw_message"):
+        row["glucose_mg_dl"] = _f(
+            d.get("blood_glucose_mg_dl", d.get("concentration"))
+        )
+        if d.get("is_control_solution"):
+            row["reading_type"] = "meta"
+    elif d.get("type") in (
+        "ack",
+        "nack",
+        "device_info",
+        "raw_message",
+        "racp",
+        "glucose_context",
+        "glucose_context_raw",
+    ):
         row["reading_type"] = "meta"
     elif "ordinal" in d or "samples" in d:
         row["reading_type"] = "waveform"
@@ -259,6 +271,7 @@ async def job_pair(
     brand_id: str,
     mac: str,
     model: str = "",
+    name: str = "",
     repair: bool = False,
 ) -> Dict[str, Any]:
     brand = get_brand(brand_id)
@@ -267,12 +280,14 @@ async def job_pair(
 
     model = model or brand.get("default_model") or ""
     mac_u = mac.strip().upper()
+    adv_name = (name or model or brand.get("default_model") or "").strip()
+    profile_id = resolve_profile_id(brand, model)
     device = db.upsert_device(
         brand=brand_id,
         mac=mac_u,
         model=model,
         company=brand.get("company", ""),
-        name=model,
+        name=adv_name or model,
     )
     sid = db.start_session(
         "repair" if repair else "pair",
@@ -288,7 +303,7 @@ async def job_pair(
             else:
                 await _generic_pair(
                     brand_id=brand_id,
-                    profile_id=brand["connect_profile"],
+                    profile_id=profile_id,
                     mac=mac_u,
                     model=model,
                     force_rebind=repair,
@@ -298,24 +313,57 @@ async def job_pair(
             mac=mac_u,
             model=model,
             company=brand.get("company", ""),
+            name=adv_name or model,
             paired=True,
         )
+        # Nipro companion registry (exact name + CheckPairing id)
+        if brand.get("is_nipro") or brand_id.startswith("nipro"):
+            try:
+                from medical_ble_toolkit.nipro.registry import register_meter
+
+                register_meter(
+                    device_id=mac_u,
+                    name=adv_name or model,
+                    profile_id=profile_id,
+                    address=mac_u,
+                    serial="",
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("nipro registry register skip: %s", exc)
         db.end_session(sid, "ok")
         out: Dict[str, Any] = {
             "ok": True,
             "mac": mac_u,
             "brand": brand_id,
+            "profile": profile_id,
             "session_id": sid,
         }
         if brand.get("is_omron"):
             out["next_steps"] = [
                 "Pair OK. Many setups Sync without any button if the bond is solid.",
-                "If Sync fails (FE4A): SHORT-press BT once, then Sync again.",
-                "Flashing P is only for Pair / Re-pair, not every Sync.",
-                "HEM-7143T1 history map is 30 EEPROM slots (by design).",
+                "The Unified Daemon will now track this device automatically.",
+                "If Sync fails (FE4A): SHORT-press BT once, then it will auto-sync.",
             ]
             # Let Windows finish storing the bond before a frantic re-connect
             await asyncio.sleep(1.5)
+        elif brand.get("is_nipro") or brand_id.startswith("nipro") or brand_id == "thermo":
+            out["next_steps"] = [
+                "Paired. Take a measurement on the device.",
+                "The Unified Daemon will automatically capture the history dump.",
+            ]
+        elif brand_id == "masimo":
+            out["next_steps"] = [
+                "Paired. Keep your finger in the sensor.",
+                "The Unified Daemon will automatically start the live SpO2 stream.",
+            ]
+            
+        # Auto-start the unified daemon if it's not already running
+        if not _daemon_status.get("active"):
+            try:
+                await job_daemon_start()
+            except Exception as exc:
+                log.warning("Failed to auto-start unified daemon: %s", exc)
+                
         return out
     except Exception as exc:  # noqa: BLE001
         db.end_session(sid, "fail", error=str(exc))
@@ -353,14 +401,24 @@ async def _generic_pair(
         return
 
     profile = get_profile(profile_id)
+    need_pair = is_windows() and profile_id in (
+        "nipro_nmbp",
+        "and_ua651",
+        "beurer_bp",
+        "beurer_bm54",
+    )
+    # short pair session for Nipro companion (register + light connect)
+    duration = 12.0 if brand_id == "masimo" else 8.0
+    if profile_id.startswith("nipro_") or profile_id == "mightysat":
+        duration = 10.0
     client = MedicalBleClient(
         address=mac,
         profile=profile,
-        pair=is_windows(),
+        pair=need_pair or (is_windows() and brand_id not in ("nipro_nt100b", "thermo")),
         connect_retries=2,
         auto_dispatch=profile_id in ("re_generic", "fora6"),
     )
-    await client.run(duration=12.0 if brand_id == "masimo" else 8.0, connect_timeout=35.0)
+    await client.run(duration=duration, connect_timeout=35.0)
 
 
 async def job_sync(
@@ -369,6 +427,7 @@ async def job_sync(
     mac: str,
     model: str = "",
     listen_s: float = 30.0,
+    on_reading_cb: Optional[Callable[[], None]] = None,
 ) -> Dict[str, Any]:
     """One-shot read/sync for the brand; store clinical readings in SQLite."""
     brand = get_brand(brand_id)
@@ -448,7 +507,7 @@ async def job_sync(
                         glucose_mg_dl=row.get("glucose_mg_dl"),
                         payload=row.get("payload"),
                         raw_hex=row.get("raw_hex") or "",
-                        dedupe=True,  # Omron history re-syncs same 30 EEPROM slots
+                        dedupe=True,
                     )
                     if rid is None:
                         skipped_dup += 1
@@ -496,50 +555,54 @@ async def job_sync(
                 from medical_ble_toolkit.common.winrt_errors import is_windows
                 from medical_ble_toolkit.profiles import get_profile
 
-                profile = get_profile(brand["connect_profile"])
-                is_thermo = brand_id in ("thermo", "thermometer")
-                # Session length by brand
-                if is_thermo:
-                    # History poll is in post-connect setup; short quiet listen after
-                    duration = max(12.0, min(float(listen_s), 25.0))
-                elif brand_id == "and":
-                    duration = max(60.0, listen_s)
+                profile_id = resolve_profile_id(brand, model)
+                profile = get_profile(profile_id)
+                is_thermo = brand_id in (
+                    "thermo",
+                    "thermometer",
+                    "nipro_nt100b",
+                    "nipro_nsm1",
+                )
+                is_nipro_bp = brand_id in ("nipro_nbp", "nipro_nmbp") or profile_id in (
+                    "nipro_nbp",
+                    "nipro_nmbp",
+                )
+                is_nipro_cf = brand_id == "nipro_cf" or profile_id == "nipro_cf"
+                # Session length by brand (companion defaults ~60s receive)
+                if is_thermo or is_nipro_bp or is_nipro_cf or brand_id == "and":
+                    # Companion receive timeout ~60s; quiet-end finishes earlier
+                    duration = max(45.0, float(listen_s))
                 elif brand_id == "masimo":
                     duration = max(20.0, listen_s)
                 else:
                     duration = listen_s
 
-                # Thermo: skip re-pair every sync (eats the ~2 min BLE window)
+                # Thermo / NT: skip re-pair every sync (eats BLE window)
                 dev_row = db.get_device_by_mac(mac_u) or {}
-                do_pair = is_windows() and (
-                    not is_thermo or not bool(dev_row.get("paired"))
-                )
-                client = MedicalBleClient(
-                    address=mac_u,
-                    profile=profile,
-                    pair=do_pair,
-                    connect_retries=2 if not is_thermo else 1,
-                    auto_dispatch=brand["connect_profile"]
-                    in ("re_generic", "fora6"),
-                )
-                await client.run(
-                    duration=duration,
-                    connect_timeout=25.0 if is_thermo else 35.0,
-                    quiet_timeout=3.0 if is_thermo else None,
-                )
-                for r in client.readings:
+                already_paired = bool(dev_row.get("paired"))
+                if is_thermo or brand_id in ("nipro_nt100b", "thermo"):
+                    do_pair = False  # never re-pair mid window
+                elif profile_id in ("nipro_nmbp", "and_ua651"):
+                    do_pair = is_windows()
+                elif brand_id.startswith("nipro") or brand.get("is_nipro"):
+                    do_pair = is_windows() and not already_paired
+                else:
+                    do_pair = is_windows()
+
+                def _live_cb(r: Any) -> None:
+                    nonlocal stored
                     row = _reading_to_row(r, brand_id)
                     if row["reading_type"] == "waveform":
-                        continue
-                    # A&D: only store real BP (sys/dia), never custom meta garbage
+                        return
                     if brand_id == "and" and not _is_clinical(row):
-                        continue
-                    # Thermo: store temps; skip meta dicts (storage_count, model, …)
-                    if is_thermo and not _is_clinical(row):
-                        continue
+                        return
+                    if (is_thermo or is_nipro_bp or is_nipro_cf) and not _is_clinical(
+                        row
+                    ):
+                        return
                     if _is_clinical(row) or row["reading_type"] in ("meta", "raw"):
                         if row["reading_type"] == "meta":
-                            continue
+                            return
                         rid = db.insert_reading(
                             device_id=device_id,
                             session_id=sid,
@@ -561,6 +624,63 @@ async def job_sync(
                             collected.append(row)
                             if rid is not None:
                                 stored += 1
+                            if on_reading_cb:
+                                on_reading_cb()
+
+                # Omron-like post-measure: hunt device after reading (short BLE window)
+                find_to = 0.0
+                name_hint = (
+                    (dev_row.get("name") or model or brand.get("default_model") or "")
+                ).strip()
+                if (
+                    brand.get("is_nipro")
+                    or brand_id.startswith("nipro")
+                    or brand_id in ("masimo", "thermo")
+                ):
+                    from medical_ble_toolkit.nipro import post_measure as pm
+
+                    find_to = pm.find_window_for(profile_id)
+                    duration = max(duration, pm.receive_s_for(profile_id))
+                    log.info(
+                        "[POST-MEASURE] web sync find=%.0fs receive=%.0fs profile=%s "
+                        "(measure first, then Sync — display may already be off)",
+                        find_to,
+                        duration,
+                        profile_id,
+                    )
+
+                client = MedicalBleClient(
+                    address=mac_u,
+                    profile=profile,
+                    pair=do_pair,
+                    connect_retries=5 if find_to > 0 else (2 if not is_thermo else 1),
+                    on_reading=_live_cb,
+                    auto_dispatch=profile_id in ("re_generic", "fora6"),
+                    find_timeout=find_to,
+                    name_hint=name_hint,
+                )
+                # NT-100B / Nipro: toolkit quiet-end + bulk history dump
+                await client.run(
+                    duration=duration,
+                    connect_timeout=15.0 if find_to > 0 else (30.0 if is_thermo else 35.0),
+                    quiet_timeout=None,
+                )
+                # Ensure Nipro registry has exact name for hands-free
+                if brand.get("is_nipro") or brand_id.startswith("nipro"):
+                    try:
+                        from medical_ble_toolkit.nipro.registry import register_meter
+
+                        register_meter(
+                            device_id=mac_u,
+                            name=(
+                                (dev_row.get("name") or model or brand.get("default_model") or "")
+                            ).strip(),
+                            profile_id=profile_id,
+                            address=mac_u,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        log.debug("nipro registry upsert: %s", exc)
+                # Data is now inserted via _live_cb during the run
 
         latest = _pick_newest(collected)
         db.end_session(sid, "ok")
@@ -593,18 +713,24 @@ async def job_sync(
             "readings": ui_rows[:80],  # this sync batch for immediate dashboard
             "session_id": sid,
         }
-        if brand_id in ("thermo", "thermometer") and stored == 0:
+        if brand_id in ("thermo", "thermometer", "nipro_nt100b") and stored == 0:
             out["warning"] = (
                 "NT-100B stored 0 temps. Device BLE is usually OFF until you take "
                 "a forehead reading; advertising lasts ~1–2 minutes only. "
                 "Workflow: measure → (optional Pair once) → Sync immediately while "
-                "BLE is on. If still 0: check MAC/name, keep device awake, retry Sync."
+                "BLE is on. Companion path uses HTP indicate + power-off."
             )
             out["tips"] = [
                 "1. Take a temperature measurement on the NT-100B first.",
                 "2. Within ~2 minutes (while BLE is advertising), click Sync.",
                 "3. Pair only once; re-pairing every Sync can miss the window.",
-                "4. Do not wait — the device turns BLE off after the short window.",
+                "4. Prefer brand 'Nipro NT-100B (companion)' not TICD lab.",
+            ]
+        if brand_id in ("nipro_nbp", "nipro_nmbp") and stored == 0:
+            out["tips"] = [
+                "1. Complete a BP measurement on the cuff first.",
+                "2. Keep the cuff near the PC and click Sync (history indicates after clock).",
+                "3. NMBP: Pair once with Windows bond if indications never arrive.",
             ]
         return out
     except BleJobError as exc:
@@ -640,6 +766,11 @@ async def job_live_start(
     Live stop or max_reconnects (streaming brands only by default).
     """
     global _live_task
+
+    if _cycle_task and not _cycle_task.done():
+        raise RuntimeError(
+            "Multi-device cycle is running — stop Cycle first, then Live"
+        )
 
     if _live_task and not _live_task.done():
         raise RuntimeError("Live session already running — stop it first")
@@ -690,7 +821,7 @@ async def job_live_start(
         last_db_mono = 0.0
         last_spo2_key = ""
         last_vital_mono = 0.0
-        profile = get_profile(brand["connect_profile"])
+        profile = get_profile(resolve_profile_id(brand, model))
         is_stream = brand_id == "masimo" or profile.id == "mightysat"
         do_reconnect = bool(auto_reconnect) and is_stream
         session_end = _time.monotonic() + max(30.0, float(duration_s))
@@ -724,7 +855,7 @@ async def job_live_start(
                 last_spo2_key = key
                 last_db_mono = mono
                 try:
-                    db.insert_reading(
+                    rid = db.insert_reading(
                         device_id=device_id,
                         session_id=sid,
                         brand=brand_id,
@@ -740,6 +871,8 @@ async def job_live_start(
                         payload=row.get("payload"),
                         raw_hex=row.get("raw_hex") or "",
                     )
+                    if rid is not None:
+                        _push_dashboard(highlight_mac=mac_u)
                 except Exception as db_exc:  # noqa: BLE001
                     log.warning("live DB write: %s", db_exc)
             if on_reading:
@@ -974,3 +1107,736 @@ async def job_live_stop() -> Dict[str, Any]:
     # Keep last live packet for reference, but mark inactive so UI uses device history
     _push_live_to_clients()
     return {"ok": True, "status": live_status()}
+
+
+# ---------------------------------------------------------------------------
+# Multi-device auto-cycle (one radio at a time, all cards always visible)
+# ---------------------------------------------------------------------------
+
+_cycle_task: Optional[asyncio.Task] = None
+_cycle_stop = asyncio.Event()
+_cycle_status: Dict[str, Any] = {
+    "active": False,
+    "status": "idle",
+    "slot_s": 30.0,
+    "round": 0,
+    "index": 0,
+    "total": 0,
+    "current_mac": "",
+    "current_brand": "",
+    "current_model": "",
+    "message": "",
+    "error": "",
+    "last_results": [],  # per-device outcome of last pass
+    "roster": [],  # [{mac, brand, model, company}]
+    "updated_at": "",
+}
+
+
+def cycle_status() -> Dict[str, Any]:
+    snap = dict(_cycle_status)
+    snap["roster"] = list(_cycle_status.get("roster") or [])
+    snap["last_results"] = list(_cycle_status.get("last_results") or [])
+    return snap
+
+
+def build_dashboard(
+    *,
+    macs: Optional[List[str]] = None,
+    highlight_mac: str = "",
+) -> Dict[str, Any]:
+    """All devices side-by-side with latest clinical + cycle highlight."""
+    board = db.dashboard_board(macs=macs)
+    hm = (highlight_mac or "").strip().upper()
+    cs = cycle_status()
+    for card in board:
+        mac = (card.get("mac") or "").upper()
+        card["active"] = bool(cs.get("active") and mac == hm)
+        card["slot_status"] = "reading" if card["active"] else "idle"
+        
+        card["online"] = False
+        for res in cs.get("last_results", []):
+            if (res.get("mac") or "").upper() == mac:
+                card["online"] = bool(res.get("ok"))
+                break
+        # Attach compact vitals for UI
+        latest = card.get("latest") or {}
+        card["vitals"] = {
+            "reading_type": latest.get("reading_type"),
+            "measured_at": latest.get("measured_at") or latest.get("created_at"),
+            "systolic": latest.get("systolic"),
+            "diastolic": latest.get("diastolic"),
+            "pulse_rate": latest.get("pulse_rate"),
+            "spo2": latest.get("spo2"),
+            "perfusion_index": latest.get("perfusion_index"),
+            "temperature": latest.get("temperature"),
+            "glucose_mg_dl": latest.get("glucose_mg_dl"),
+        } if latest else None
+    return {
+        "ok": True,
+        "board": board,
+        "cycle": cs,
+        "count": len(board),
+    }
+
+
+def _push_dashboard(highlight_mac: str = "") -> None:
+    """Fan-out multi-device board (+ cycle state) to all WS clients."""
+    if not _live_queues:
+        return
+    payload = {
+        "type": "dashboard",
+        "dashboard": build_dashboard(
+            highlight_mac=highlight_mac or _cycle_status.get("current_mac") or ""
+        ),
+    }
+    dead: List[asyncio.Queue] = []
+    for q in list(_live_queues):
+        try:
+            if q.full():
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            q.put_nowait(payload)
+        except Exception:  # noqa: BLE001
+            dead.append(q)
+    for q in dead:
+        unsubscribe_live(q)
+
+
+def _cycle_now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _listen_for_brand(brand_id: str, slot_s: float) -> float:
+    """How long to listen during a cycle slot (capped by slot)."""
+    slot = max(5.0, float(slot_s))
+    if brand_id == "masimo":
+        return slot  # stream for full slot
+    if brand_id == "and":
+        return min(slot, 60.0)  # A&D may need longer indicate dump
+    if brand_id in ("thermo", "thermometer"):
+        return min(slot, 20.0)
+    if brand_id == "omron":
+        return min(slot, 45.0)
+    return min(slot, 30.0)
+
+
+async def job_cycle_start(
+    *,
+    macs: Optional[List[str]] = None,
+    slot_s: float = 30.0,
+    rounds: int = 0,
+) -> Dict[str, Any]:
+    """
+    Auto-cycle: spend ``slot_s`` seconds on each saved device in turn.
+
+    Windows BLE is one radio — devices are read sequentially, but the dashboard
+    always shows *all* devices' latest vitals together. Highlight follows the
+    active slot.
+
+    rounds: 0 = forever until stop; else stop after N full passes.
+    """
+    global _cycle_task, _live_task
+
+    if _cycle_task and not _cycle_task.done():
+        raise RuntimeError("Multi-device cycle already running — stop it first")
+
+    # Live stream holds the radio — stop it first
+    if _live_task and not _live_task.done():
+        log.info("Stopping single-device live so multi-device cycle can start")
+        await job_live_stop()
+
+    devices = db.list_devices()
+    if macs:
+        want = {m.strip().upper() for m in macs if m and str(m).strip()}
+        devices = [d for d in devices if (d.get("mac") or "").upper() in want]
+    # Prefer paired devices; still include unpaired if explicitly listed
+    if not devices:
+        raise ValueError("No saved devices to cycle — Save devices first")
+
+    roster: List[Dict[str, Any]] = []
+    for d in devices:
+        brand_id = (d.get("brand") or "").lower()
+        if brand_id in ("re", "fora"):
+            continue  # not useful for clinical cycle POC
+        if not get_brand(brand_id):
+            continue
+        roster.append(
+            {
+                "mac": (d.get("mac") or "").upper(),
+                "brand": brand_id,
+                "model": d.get("model") or "",
+                "company": d.get("company") or "",
+                "name": d.get("name") or d.get("model") or "",
+            }
+        )
+    if not roster:
+        raise ValueError("No cycleable clinical devices in the roster")
+
+    slot = max(10.0, min(float(slot_s), 120.0))
+    max_rounds = max(0, int(rounds))
+
+    _cycle_stop.clear()
+    _cycle_status.update(
+        {
+            "active": True,
+            "status": "starting",
+            "slot_s": slot,
+            "round": 0,
+            "index": 0,
+            "total": len(roster),
+            "current_mac": "",
+            "current_brand": "",
+            "current_model": "",
+            "message": f"Cycling {len(roster)} device(s), {slot:.0f}s each",
+            "error": "",
+            "last_results": [],
+            "roster": roster,
+            "updated_at": _cycle_now(),
+            "max_rounds": max_rounds,
+        }
+    )
+    _push_dashboard()
+
+    async def _runner() -> None:
+        import time as _time
+
+        round_i = 0
+        try:
+            while not _cycle_stop.is_set():
+                round_i += 1
+                if max_rounds and round_i > max_rounds:
+                    _cycle_status["status"] = "completed"
+                    _cycle_status["message"] = f"Finished {max_rounds} round(s)"
+                    break
+
+                _cycle_status["round"] = round_i
+                round_results: List[Dict[str, Any]] = []
+
+                for idx, dev in enumerate(roster):
+                    if _cycle_stop.is_set():
+                        break
+
+                    mac = dev["mac"]
+                    brand_id = dev["brand"]
+                    model = dev["model"]
+                    slot_start = _time.monotonic()
+
+                    _cycle_status.update(
+                        {
+                            "status": "reading",
+                            "index": idx + 1,
+                            "current_mac": mac,
+                            "current_brand": brand_id,
+                            "current_model": model,
+                            "message": (
+                                f"Round {round_i} · {idx + 1}/{len(roster)} · "
+                                f"{brand_id} {model or mac} · slot {slot:.0f}s"
+                            ),
+                            "error": "",
+                            "updated_at": _cycle_now(),
+                        }
+                    )
+                    _push_dashboard(highlight_mac=mac)
+                    log.info(
+                        "Cycle slot brand=%s mac=%s slot=%.0fs round=%d",
+                        brand_id,
+                        mac,
+                        slot,
+                        round_i,
+                    )
+
+                    result_row: Dict[str, Any] = {
+                        "mac": mac,
+                        "brand": brand_id,
+                        "model": model,
+                        "ok": False,
+                        "stored": 0,
+                        "error": "",
+                        "latest": None,
+                    }
+                    try:
+                        listen = _listen_for_brand(brand_id, slot)
+                        last_push = [0.0]
+                        def _on_live():
+                            now_t = _time.monotonic()
+                            if now_t - last_push[0] > 0.5:
+                                _push_dashboard(highlight_mac=mac)
+                                last_push[0] = now_t
+                            
+                        # History dump / short stream for this device
+                        sync_out = await job_sync(
+                            brand_id=brand_id,
+                            mac=mac,
+                            model=model,
+                            listen_s=listen,
+                            on_reading_cb=_on_live,
+                        )
+                        result_row["ok"] = bool(sync_out.get("ok"))
+                        result_row["stored"] = int(sync_out.get("stored") or 0)
+                        result_row["total"] = int(sync_out.get("total") or 0)
+                        result_row["latest"] = sync_out.get("latest")
+                        result_row["skipped_duplicates"] = int(
+                            sync_out.get("skipped_duplicates") or 0
+                        )
+                        _cycle_status["message"] = (
+                            f"OK {brand_id} · stored {result_row['stored']} · "
+                            f"holding slot until {slot:.0f}s"
+                        )
+                        _cycle_status["updated_at"] = _cycle_now()
+                        _push_dashboard(highlight_mac=mac)
+                    except BleJobError as exc:
+                        result_row["error"] = str(exc)
+                        _cycle_status["error"] = f"{brand_id}: {exc}"
+                        log.warning("Cycle slot failed %s: %s", mac, exc)
+                        _push_dashboard(highlight_mac=mac)
+                    except Exception as exc:  # noqa: BLE001
+                        result_row["error"] = f"{type(exc).__name__}: {exc}"
+                        _cycle_status["error"] = result_row["error"]
+                        log.warning("Cycle slot failed %s: %s", mac, exc)
+                        _push_dashboard(highlight_mac=mac)
+
+                    round_results.append(result_row)
+                    _cycle_status["last_results"] = list(round_results)
+
+                    # Done-then-move: minimum 10s dwell (except masimo uses full slot)
+                    elapsed = _time.monotonic() - slot_start
+                    target_dwell = slot if brand_id == "masimo" else max(10.0, elapsed)
+                    remain = target_dwell - elapsed
+                    
+                    if remain > 0.2 and not _cycle_stop.is_set():
+                        _cycle_status["status"] = "dwell"
+                        _cycle_status["message"] = (
+                            f"{brand_id} done · dwell {remain:.0f}s more "
+                            f"({idx + 1}/{len(roster)})"
+                        )
+                        _push_dashboard(highlight_mac=mac)
+                        try:
+                            await asyncio.wait_for(_cycle_stop.wait(), timeout=remain)
+                            break  # stop requested
+                        except asyncio.TimeoutError:
+                            pass
+
+                if _cycle_stop.is_set():
+                    break
+
+                # Brief pause between rounds
+                _cycle_status["status"] = "between_rounds"
+                _cycle_status["current_mac"] = ""
+                _cycle_status["message"] = f"Round {round_i} complete — next round…"
+                _push_dashboard(highlight_mac="")
+                try:
+                    await asyncio.wait_for(_cycle_stop.wait(), timeout=2.0)
+                    break
+                except asyncio.TimeoutError:
+                    continue
+
+            if _cycle_stop.is_set():
+                _cycle_status["status"] = "stopped"
+                _cycle_status["message"] = "Cycle stopped"
+            elif _cycle_status.get("status") != "completed":
+                _cycle_status["status"] = "stopped"
+        except Exception as exc:  # noqa: BLE001
+            log.exception("cycle failed")
+            _cycle_status["status"] = "error"
+            _cycle_status["error"] = str(exc)
+            _cycle_status["message"] = f"Cycle error: {exc}"
+        finally:
+            _cycle_status["active"] = False
+            _cycle_status["current_mac"] = ""
+            _cycle_status["updated_at"] = _cycle_now()
+            if _cycle_status.get("status") not in ("completed", "error", "stopped"):
+                _cycle_status["status"] = "stopped"
+            _push_dashboard(highlight_mac="")
+
+    _cycle_task = asyncio.create_task(_runner())
+    return {
+        "ok": True,
+        "message": (
+            f"Multi-device cycle started: {len(roster)} device(s), "
+            f"{slot:.0f}s each, sequential BLE (all cards always visible)"
+        ),
+        "slot_s": slot,
+        "roster": roster,
+        "rounds": max_rounds or "infinite",
+        "dashboard": build_dashboard(),
+    }
+
+
+async def job_cycle_stop() -> Dict[str, Any]:
+    global _cycle_task
+    _cycle_stop.set()
+    if _cycle_task and not _cycle_task.done():
+        try:
+            await asyncio.wait_for(_cycle_task, timeout=20.0)
+        except asyncio.TimeoutError:
+            _cycle_task.cancel()
+            try:
+                await _cycle_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+    _cycle_status["active"] = False
+    if _cycle_status.get("status") not in ("error", "completed"):
+        _cycle_status["status"] = "stopped"
+    _cycle_status["message"] = "Cycle stopped"
+    _cycle_status["current_mac"] = ""
+    _cycle_status["updated_at"] = _cycle_now()
+    _push_dashboard(highlight_mac="")
+    return {"ok": True, "cycle": cycle_status(), "dashboard": build_dashboard()}
+
+
+# ---------------------------------------------------------------------------
+# Nipro registry + hands-free (companion-like)
+# ---------------------------------------------------------------------------
+
+_handsfree_task: Optional[asyncio.Task] = None
+_handsfree_status: Dict[str, Any] = {
+    "active": False,
+    "status": "idle",
+    "message": "",
+    "readings": 0,
+    "started_at": "",
+    "updated_at": "",
+}
+
+
+def handsfree_status() -> Dict[str, Any]:
+    return dict(_handsfree_status)
+
+
+async def job_nipro_list() -> Dict[str, Any]:
+    from medical_ble_toolkit.nipro.registry import list_meters
+
+    meters = list_meters()
+    return {
+        "ok": True,
+        "meters": [
+            {
+                "name": m.name,
+                "category": m.category,
+                "profile_id": m.profile_id,
+                "id_nodash": m.id_nodash,
+                "address": m.address,
+                "serial": m.serial,
+            }
+            for m in meters
+        ],
+    }
+
+
+async def job_nipro_register(
+    *,
+    mac: str,
+    name: str,
+    brand_id: str = "",
+    model: str = "",
+    serial: str = "",
+) -> Dict[str, Any]:
+    """Register device into Nipro hands-free registry without full BLE pair."""
+    from medical_ble_toolkit.nipro.registry import register_meter
+
+    brand = get_brand(brand_id) if brand_id else None
+    profile_id = (
+        resolve_profile_id(brand, model)
+        if brand
+        else (brand_id or "nipro_nbp")
+    )
+    if brand:
+        profile_id = resolve_profile_id(brand, model or name)
+    meter = register_meter(
+        device_id=mac,
+        name=name.strip(),
+        profile_id=profile_id,
+        address=mac.strip().upper(),
+        serial=serial or "",
+    )
+    # Also save web device row
+    if brand:
+        db.upsert_device(
+            brand=brand_id,
+            mac=mac.strip().upper(),
+            model=model or brand.get("default_model", ""),
+            name=name.strip(),
+            company=brand.get("company", ""),
+            paired=True,
+        )
+    return {
+        "ok": True,
+        "meter": {
+            "name": meter.name,
+            "category": meter.category,
+            "profile_id": meter.profile_id,
+            "address": meter.address,
+            "id_nodash": meter.id_nodash,
+        },
+    }
+
+
+async def job_nipro_handsfree_start(
+    *,
+    duration_s: float = 3600.0,
+    receive_timeout: float = 60.0,
+    categories: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Background hands-free wait (uses BLE lock inside toolkit sessions)."""
+    global _handsfree_task
+
+    if _handsfree_task and not _handsfree_task.done():
+        raise RuntimeError("Nipro hands-free already running — stop it first")
+    if _live_task and not _live_task.done():
+        raise RuntimeError("Live is running — stop Live first")
+    if _cycle_task and not _cycle_task.done():
+        raise RuntimeError("Cycle is running — stop Cycle first")
+
+    from medical_ble_toolkit.nipro.handsfree import handsfree_wait
+    from medical_ble_toolkit.nipro.registry import list_meters
+
+    if not list_meters():
+        raise ValueError(
+            "No Nipro meters registered. Pair a Nipro brand device first "
+            "(or POST /nipro/register with exact BLE name)."
+        )
+
+    _handsfree_status.update(
+        {
+            "active": True,
+            "status": "running",
+            "message": "Hands-free wait started",
+            "readings": 0,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+    async def _runner() -> None:
+        stored = 0
+        try:
+
+            def _on_reading(obj: Any) -> None:
+                nonlocal stored
+                row = _reading_to_row(obj, "nipro")
+                if not _is_clinical(row):
+                    return
+                # Best-effort device id by MAC unknown in callback — store without device
+                rid = db.insert_reading(
+                    device_id=None,
+                    session_id=None,
+                    brand="nipro",
+                    reading_type=row["reading_type"],
+                    measured_at=row.get("measured_at"),
+                    systolic=row.get("systolic"),
+                    diastolic=row.get("diastolic"),
+                    pulse_rate=row.get("pulse_rate"),
+                    spo2=row.get("spo2"),
+                    perfusion_index=row.get("perfusion_index"),
+                    temperature=row.get("temperature"),
+                    glucose_mg_dl=row.get("glucose_mg_dl"),
+                    payload=row.get("payload"),
+                    raw_hex=row.get("raw_hex") or "",
+                    dedupe=True,
+                )
+                if rid is not None:
+                    stored += 1
+                _handsfree_status["readings"] = stored
+                _handsfree_status["updated_at"] = datetime.now().isoformat(
+                    timespec="seconds"
+                )
+                _handsfree_status["latest"] = {
+                    k: row.get(k)
+                    for k in (
+                        "reading_type",
+                        "measured_at",
+                        "systolic",
+                        "diastolic",
+                        "pulse_rate",
+                        "spo2",
+                        "temperature",
+                        "glucose_mg_dl",
+                    )
+                }
+                _push_live_to_clients()
+
+            # handsfree_wait holds BLE sessions; run outside _ble_lock (it uses client lock per session)
+            # Use toolkit lock via nesting: handsfree creates MedicalBleClient which needs radio
+            async with _ble_lock:
+                # Re-enter: handsfree itself calls scan/connect — hold lock for whole wait
+                await handsfree_wait(
+                    duration=float(duration_s),
+                    receive_timeout=float(receive_timeout),
+                    categories=categories,
+                    on_reading=_on_reading,
+                )
+            _handsfree_status["status"] = "completed"
+            _handsfree_status["message"] = f"Done — stored ~{stored} clinical reading(s)"
+        except Exception as exc:  # noqa: BLE001
+            log.exception("hands-free failed")
+            _handsfree_status["status"] = "error"
+            _handsfree_status["message"] = str(exc)
+        finally:
+            _handsfree_status["active"] = False
+            _handsfree_status["updated_at"] = datetime.now().isoformat(
+                timespec="seconds"
+            )
+            _push_live_to_clients()
+            _push_dashboard(highlight_mac="")
+
+    _handsfree_task = asyncio.create_task(_runner())
+    return {
+        "ok": True,
+        "message": f"Nipro hands-free started for {duration_s:.0f}s",
+        "handsfree": handsfree_status(),
+    }
+
+
+async def job_nipro_handsfree_stop() -> Dict[str, Any]:
+    global _handsfree_task
+    # Cooperative stop not built into handsfree_wait — cancel task
+    if _handsfree_task and not _handsfree_task.done():
+        _handsfree_task.cancel()
+        try:
+            await _handsfree_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    _handsfree_status["active"] = False
+    _handsfree_status["status"] = "stopped"
+    _handsfree_status["message"] = "Hands-free stopped"
+    _handsfree_status["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    return {"ok": True, "handsfree": handsfree_status()}
+
+# ---------------------------------------------------------------------------
+# Unified Daemon (Seamless Pairing + Auto-Reconnection)
+# ---------------------------------------------------------------------------
+
+_daemon_task: Optional[asyncio.Task] = None
+_daemon_stop = asyncio.Event()
+_daemon_status: Dict[str, Any] = {
+    "active": False,
+    "status": "idle",
+    "message": "",
+    "updated_at": "",
+}
+
+def daemon_status() -> Dict[str, Any]:
+    return dict(_daemon_status)
+
+async def job_daemon_start(*, duration_s: float = 28800.0) -> Dict[str, Any]:
+    global _daemon_task
+    
+    if _daemon_task and not _daemon_task.done():
+        return {"ok": True, "message": "Daemon already running", "daemon": daemon_status()}
+    
+    # Ensure no other background tasks are running
+    if _handsfree_task and not _handsfree_task.done():
+        await job_nipro_handsfree_stop()
+    if _live_task and not _live_task.done():
+        await job_live_stop()
+    if _cycle_task and not _cycle_task.done():
+        await job_cycle_stop()
+
+    _daemon_stop.clear()
+    _daemon_status.update({
+        "active": True,
+        "status": "running",
+        "message": "Unified Background Sync Daemon started",
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    })
+
+    async def _runner() -> None:
+        import time as _time
+        from medical_ble_toolkit.ble_client import scan_devices
+        
+        session_end = _time.monotonic() + float(duration_s)
+        
+        try:
+            while not _daemon_stop.is_set():
+                if _time.monotonic() > session_end:
+                    break
+                
+                # Load all paired devices from DB (dynamically picking up new pairs)
+                devices = db.list_devices()
+                paired = [d for d in devices if d.get("paired") or d.get("brand")]
+                if not paired:
+                    await asyncio.sleep(5.0)
+                    continue
+
+                # Scan briefly to catch episodic ads
+                try:
+                    scanned = await scan_devices(profile=None, timeout=5.0)
+                except Exception as exc:
+                    log.warning("Daemon scan error: %s", exc)
+                    await asyncio.sleep(3.0)
+                    continue
+
+                if _daemon_stop.is_set():
+                    break
+
+                for d in paired:
+                    mac = (d.get("mac") or "").upper()
+                    brand_id = (d.get("brand") or "").lower()
+                    model = d.get("model") or ""
+                    
+                    found = False
+                    for sd in scanned:
+                        smac = (getattr(sd, "address", "") or "").upper()
+                        sname = (getattr(sd, "name", None) or "").strip()
+                        if smac == mac or (sname and sname == (d.get("name") or "").strip()):
+                            found = True
+                            mac = smac  # Use the scanned MAC (useful if Windows resolves it differently)
+                            break
+
+                    if found:
+                        if brand_id == "masimo":
+                            if not _live_status.get("active"):
+                                _daemon_status["message"] = f"Streaming from {brand_id} {mac}..."
+                                _push_dashboard(highlight_mac=mac)
+                                await job_live_start(brand_id=brand_id, mac=mac, model=model, duration_s=duration_s, auto_reconnect=True)
+                        else:
+                            # Episodic device - trigger a quick sync dump
+                            _daemon_status["message"] = f"Syncing {brand_id} {mac}..."
+                            _push_dashboard(highlight_mac=mac)
+                            try:
+                                def _on_reading():
+                                    _push_dashboard(highlight_mac=mac)
+                                # Setting listen_s a bit longer to ensure stability over battery drain
+                                await job_sync(brand_id=brand_id, mac=mac, model=model, listen_s=45.0, on_reading_cb=_on_reading)
+                            except Exception as exc:
+                                log.warning("Daemon sync failed for %s: %s", mac, exc)
+
+                        _daemon_status["message"] = "Unified Background Sync Daemon scanning..."
+                        _push_dashboard(highlight_mac="")
+                        break # Only handle one device per scan chunk to prevent starvation
+
+            _daemon_status["status"] = "completed"
+            _daemon_status["message"] = "Daemon finished"
+        except Exception as exc:
+            log.exception("Daemon failed")
+            _daemon_status["status"] = "error"
+            _daemon_status["message"] = str(exc)
+        finally:
+            _daemon_status["active"] = False
+            _daemon_status["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            _push_dashboard(highlight_mac="")
+
+    _daemon_task = asyncio.create_task(_runner())
+    return {
+        "ok": True,
+        "message": f"Daemon started for {duration_s:.0f}s",
+        "daemon": daemon_status(),
+    }
+
+async def job_daemon_stop() -> Dict[str, Any]:
+    global _daemon_task
+    _daemon_stop.set()
+    if _daemon_task and not _daemon_task.done():
+        _daemon_task.cancel()
+        try:
+            await _daemon_task
+        except (asyncio.CancelledError, Exception):
+            pass
+    _daemon_status["active"] = False
+    _daemon_status["status"] = "stopped"
+    _daemon_status["message"] = "Daemon stopped"
+    _daemon_status["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    return {"ok": True, "daemon": daemon_status()}

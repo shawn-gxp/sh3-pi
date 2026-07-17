@@ -212,10 +212,87 @@ PROFILES: dict[str, DeviceProfile] = {
         notify_uuids=("00002a35-0000-1000-8000-00805f9b34fb",),
         write_uuid="233bf001-5a34-1b6d-975c-000d5690abe4",  # A&D custom char
         notes=(
-            "BLP 0x2A35 + custom 0xF000. Post-connect: CCCD Indicate + Date Time "
-            "0x2A08 and/or custom 0x01 Set Time within 5s (SDK §3). Then bulk "
-            "Indicate oldest-first. Also: 0x03 disconnect, 0x10 unpair, 0x12 clear, "
-            "0xA6/0xD6 buffer size, 0xE1 request-all-memory."
+            "Full A&D SDK path: BLP + custom 0xA6/0x01/0xE1. For Nipro げんきノート "
+            "meters use nipro_nbp / nipro_nmbp (companion-simple BLP+0x2A08 only)."
+        ),
+    ),
+    # --- Nipro げんきノート companion-like (BLELib parity) ---
+    "nipro_nbp": DeviceProfile(
+        id="nipro_nbp",
+        brand="nipro",
+        model="NBP-1BLE",
+        parser_key="nipro_nbp",
+        name_hints=("NBP-1BLE", "NBP-1"),
+        service_uuid="00001810-0000-1000-8000-00805f9b34fb",
+        notify_uuids=("00002a35-0000-1000-8000-00805f9b34fb",),
+        write_uuid="00002a08-0000-1000-8000-00805f9b34fb",
+        notes=(
+            "Companion BLEDeviceNBP1: sleep 1s → write DateTime 0x2A08 → indicate "
+            "0x2A35. No A&D custom 0xE1."
+        ),
+    ),
+    "nipro_nmbp": DeviceProfile(
+        id="nipro_nmbp",
+        brand="nipro",
+        model="NMBP",
+        parser_key="nipro_nmbp",
+        name_hints=("NMBP",),
+        service_uuid="00001810-0000-1000-8000-00805f9b34fb",
+        notify_uuids=("00002a35-0000-1000-8000-00805f9b34fb",),
+        write_uuid="00002a08-0000-1000-8000-00805f9b34fb",
+        notes=(
+            "Companion BLEDeviceUM212 (NMBP): bond recommended + same BLP clock path "
+            "as NBP-1BLE. Prefer --pair on Windows."
+        ),
+    ),
+    "nipro_nsm1": DeviceProfile(
+        id="nipro_nsm1",
+        brand="nipro",
+        model="NSM-1BLE",
+        parser_key="nipro_nsm1",
+        name_hints=("NSM-1BLE", "NSM-1"),
+        service_uuid="00001809-0000-1000-8000-00805f9b34fb",
+        notify_uuids=("00002a1c-0000-1000-8000-00805f9b34fb",),
+        write_uuid="00002a08-0000-1000-8000-00805f9b34fb",
+        notes=(
+            "Companion BLEDeviceNSM1: sleep 1s → write HTS DateTime 0x2A08 → "
+            "indicate Temperature 0x2A1C. Pair may write custom 02 01 03 disconnect."
+        ),
+    ),
+    "nipro_nt100b": DeviceProfile(
+        id="nipro_nt100b",
+        brand="nipro",
+        model="NT-100B",
+        parser_key="nipro_nt100b",
+        name_hints=("NT-100B", "NT-100"),
+        service_uuid="00001809-0000-1000-8000-00805f9b34fb",
+        notify_uuids=(
+            "00002a1c-0000-1000-8000-00805f9b34fb",  # HTP (companion primary)
+            "00001524-1212-efde-1523-785feabcd123",  # TICD notify (history recovery)
+        ),
+        write_uuid="00001524-1212-efde-1523-785feabcd123",
+        notes=(
+            "Post-measure sync: subscribe HTP 0x2A1C + pull latest TICD storage "
+            "(0x25/0x26 idx 0) because indication often fires before connect. "
+            "Teardown: TICD power-off 0x50."
+        ),
+    ),
+    "nipro_cf": DeviceProfile(
+        id="nipro_cf",
+        brand="nipro",
+        model="NIPRO CF",
+        parser_key="nipro_cf",
+        name_hints=("NIPRO CF", "NIPROCF", "Cocoron"),
+        service_uuid="5d87a4a0-e42d-11e5-beef-0002a5d5c51b",
+        notify_uuids=(
+            "5d87a4a1-e42d-11e5-beef-0002a5d5c51b",
+            "5d87a4a2-e42d-11e5-beef-0002a5d5c51b",
+            "5d87a4a3-e42d-11e5-beef-0002a5d5c51b",
+        ),
+        write_uuid="5d87a4a3-e42d-11e5-beef-0002a5d5c51b",
+        notes=(
+            "Companion BLEDeviceCFL (Cocoron): proprietary glucose UUIDs, clock on "
+            "87F60002, RACP 04 01 / 01 01 (All) or Diff by last seq."
         ),
     ),
     "mightysat": DeviceProfile(
@@ -229,32 +306,26 @@ PROFILES: dict[str, DeviceProfile] = {
         notify_uuids=("54c21002-a720-4b4f-11e4-9fe20002a5d5",),  # TX
         write_uuid="54c21001-a720-4b4f-11e4-9fe20002a5d5",       # RX
         notes=(
-            "Proprietary framed protocol SOM=0x77. After notify enable, send "
-            "GetDeviceInfo + ConfigureStreaming via write_uuid. Filter scan by "
-            "company ID 0x0243 (service UUID adv not always present)."
+            "Companion order: notify → GetInfo → SetClock(.NET ticks) → EnableStream "
+            "from device-info bytes. SOM=0x77 framed protocol."
         ),
     ),
     "thermometer": DeviceProfile(
         id="thermometer",
         brand="thermo",
-        model="NT-100B",
+        model="NT-100B TICD history",
         parser_key="thermometer",
-        name_hints=("NT-100", "Thermometer", "TICD", "TD", "Infrared"),
-        # Base UUID 1212-efde-1523-785feabcd123 → service 0x1523 char 0x1524
-        # Some OEM firmwares use a different 128-bit base; client resolves live GATT.
+        name_hints=("TICD",),
         service_uuid="00001523-1212-efde-1523-785feabcd123",
         notify_uuids=(
             "00001524-1212-efde-1523-785feabcd123",
-            # SIG HTP Temperature Measurement (if device is HTP, not TICD serial)
             "00002a1c-0000-1000-8000-00805f9b34fb",
         ),
         write_uuid="00001524-1212-efde-1523-785feabcd123",
-        # If 0x1524 missing, subscribe will fall back to every notifiable char
         subscribe_all_notifiable=False,
         notes=(
-            "8-byte framed serial-over-BLE (TICD). Dual arbitrary cmds within 10s "
-            "enter comm mode, then 0x2B/0x25/0x26 history. If 0x1524 missing on "
-            "GATT, toolkit auto-picks write+notify serial chars."
+            "Lab/TICD history poll (0x2B/0x25/0x26). For companion-like NT-100B sync "
+            "use profile nipro_nt100b (HTP + power-off)."
         ),
     ),
     "fora6": DeviceProfile(
@@ -340,8 +411,21 @@ def get_profile(profile_id: str) -> DeviceProfile:
         "ua651ble": "and_ua651",
         "masimo": "mightysat",
         "spo2": "mightysat",
-        "nt100b": "thermometer",
-        "thermo": "thermometer",
+        "nt100b": "nipro_nt100b",
+        "thermo": "nipro_nt100b",
+        "nipro_thermo": "nipro_nt100b",
+        "nbp": "nipro_nbp",
+        "nbp1": "nipro_nbp",
+        "nbp_1ble": "nipro_nbp",
+        "nmbp": "nipro_nmbp",
+        "nsm": "nipro_nsm1",
+        "nsm1": "nipro_nsm1",
+        "nsm_1ble": "nipro_nsm1",
+        "nipro_cf": "nipro_cf",
+        "cocoron": "nipro_cf",
+        "niprocf": "nipro_cf",
+        "ticd": "thermometer",
+        "thermometer_ticd": "thermometer",
         "fora": "fora6",
         "hem-7143t1": "hem7143t1",
         "hem_7143t1": "hem7143t1",

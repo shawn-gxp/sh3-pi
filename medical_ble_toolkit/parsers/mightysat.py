@@ -91,8 +91,49 @@ def cmd_get_device_info() -> bytes:
 
 
 def cmd_set_clock(unix_seconds: int) -> bytes:
+    """
+    Datasheet-style SetClock with 4-byte Unix seconds (CSD examples).
+
+    げんきノート uses .NET DateTime.UtcNow.Ticks (8 bytes) — see
+    cmd_set_clock_dotnet_ticks() for companion parity.
+    """
     ts = int(unix_seconds).to_bytes(4, "little", signed=False)
     return build_command(bytes([0x02]) + ts)
+
+
+def cmd_set_clock_dotnet_ticks(when: Optional[datetime] = None) -> bytes:
+    """
+    Companion BLEDeviceMightySat: MakeCommand(2, BitConverter.GetBytes(UtcNow.Ticks)).
+
+    .NET ticks = 100ns intervals since 0001-01-01 UTC (int64 LE, 8 bytes).
+    """
+    dt = when or datetime.utcnow()
+    # Convert to .NET ticks
+    epoch = datetime(1, 1, 1)
+    delta = dt - epoch
+    ticks = int(delta.total_seconds() * 10_000_000)
+    # datetime is naive; treat as UTC for companion parity
+    payload = ticks.to_bytes(8, "little", signed=True)
+    return build_command(bytes([0x02]) + payload)
+
+
+def cmd_enable_stream_from_device_info(info_payload: bytes) -> bytes:
+    """
+    Companion after ACK(SetClock): EnableStream with device info bytes [3],[4],[5].
+
+    ResponseMessageCommand case 1 stores full message.Skip(2) as _DeviceInformation
+    so index 0 is msg id 0x01; indices 3..5 are available-params/wave fields.
+    Accept either full notify payload (with 0x01) or skip(2) body.
+    """
+    raw = bytes(info_payload)
+    if raw and raw[0] == 0x01 and len(raw) >= 6:
+        data = bytes([raw[3], raw[4], raw[5]])
+    elif len(raw) >= 6:
+        data = bytes([raw[3], raw[4], raw[5]])
+    else:
+        # fallback: SpO2|PR|PVi|PI|RRp + no wave filter like default mask
+        data = bytes([0x1F, 0x00, 0x03])
+    return build_command(bytes([0x03]) + data)
 
 
 def cmd_configure_streaming(param_mask: int = 0x001F, wave_mask: int = 0x03) -> bytes:
@@ -101,6 +142,8 @@ def cmd_configure_streaming(param_mask: int = 0x001F, wave_mask: int = 0x03) -> 
     param_mask: uint16 LE, wave_mask: uint8
 
     Doc example: [0x77, 0x05, 0x03, 0x1F, 0x00, 0x03, 0xD6]
+    Companion uses 3-byte EnableStream from device info instead — prefer
+    cmd_enable_stream_from_device_info when info is available.
     """
     body = bytes([
         0x03,

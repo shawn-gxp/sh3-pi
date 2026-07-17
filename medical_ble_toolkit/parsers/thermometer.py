@@ -312,13 +312,25 @@ class ThermometerParser:
         self._last_index = max(0, int(index))
 
     def can_parse(self, payload: bytes | bytearray, characteristic_uuid: str = "") -> bool:
-        uuid = (characteristic_uuid or "").lower()
+        uuid = (characteristic_uuid or "").lower().replace("-", "")
+        # HTP Temperature Measurement (NT-100B also exposes 0x2A1C Indicate)
+        if "2a1c" in uuid or "1809" in uuid:
+            return len(payload) >= 5
         if THERMO_CHAR_HINT in uuid or THERMO_SERVICE_HINT in uuid:
             return len(payload) >= 3 and (len(payload) == 8 or payload[0] == FRAME_START)
         return len(payload) == 8 and payload[0] == FRAME_START
 
-    def parse(self, payload: bytes | bytearray) -> ParseResult:
+    def parse(self, payload: bytes | bytearray, characteristic_uuid: str = "") -> ParseResult:
         raw = bytes(payload)
+        uuid = (characteristic_uuid or "").lower().replace("-", "")
+        # HTP path (live indicate on 0x2A1C) — do not require 8-byte TICD frame
+        if "2a1c" in uuid or "1809" in uuid or (
+            len(raw) >= 5 and len(raw) != 8 and raw[0] != FRAME_START
+        ):
+            from .nipro_nt100b import parse_htp_companion_style
+
+            return parse_htp_companion_style(raw)
+
         # During RE we may see incomplete frames — validate soft
         if len(raw) != 8:
             raise ParseError(f"Expected 8-byte frame, got {len(raw)}", raw)

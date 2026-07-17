@@ -384,6 +384,57 @@ def list_readings(
         return [dict(r) for r in rows]
 
 
+def latest_reading_for_device(device_id: int) -> Optional[Dict[str, Any]]:
+    """Newest clinical reading for one device (by measured_at, then id)."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT r.*, d.mac, d.name AS device_name, d.model AS device_model,
+                   d.brand AS device_brand, d.company
+            FROM readings r
+            LEFT JOIN devices d ON d.id = r.device_id
+            WHERE r.device_id = ?
+              AND r.reading_type IN ('bp', 'spo2', 'temp', 'glucose')
+            ORDER BY
+                COALESCE(r.measured_at, r.created_at) DESC,
+                r.id DESC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def dashboard_board(macs: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """
+    One card per saved device: identity + latest clinical reading.
+
+    Optionally filter to a MAC allow-list (cycle roster).
+    """
+    devices = list_devices()
+    if macs:
+        want = {m.strip().upper() for m in macs if m}
+        devices = [d for d in devices if (d.get("mac") or "").upper() in want]
+
+    board: List[Dict[str, Any]] = []
+    for d in devices:
+        did = d.get("id")
+        latest = latest_reading_for_device(int(did)) if did is not None else None
+        board.append(
+            {
+                "device_id": did,
+                "brand": d.get("brand") or "",
+                "company": d.get("company") or "",
+                "mac": (d.get("mac") or "").upper(),
+                "model": d.get("model") or "",
+                "name": d.get("name") or d.get("model") or "",
+                "paired": bool(d.get("paired")),
+                "latest": latest,
+            }
+        )
+    return board
+
+
 def save_scan_hits(devices: List[Dict[str, Any]]) -> None:
     now = _now()
     with connect() as conn:

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectGuid>{A26B3704-4F54-47A4-B4C3-5A169B63B2FE}</ProjectGuid>
+    <ProjectTypeGuids>{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <LangVersion>12.0</LangVersion>
+    <AssemblyName>Plugin.BLE</AssemblyName>
+    <TargetFrameworkIdentifier>MonoAndroid</TargetFrameworkIdentifier>
+    <TargetFrameworkVersion>v7.1</TargetFrameworkVersion>
+    <WarningLevel>4</WarningLevel>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == 'AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <OutputPath>bin\Debug\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <OutputPath>bin\Release\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Plugin.BLE.Abstractions">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Plugin.BLE.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="Mono.Android">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\Mono.Android.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Core">
+      <HintPath>C:\Users\Shawn A\Desktop\Medical project\experiments\datasheets\nipro\extracted\assemblies_decompressed\System.Core.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Plugin.BLE.Android.CallbackEventArgs\CharacteristicReadCallbackEventArgs.cs" />
+    <Compile Include="Plugin.BLE.Android.CallbackEventArgs\CharacteristicWriteCallbackEventArgs.cs" />
+    <Compile Include="Plugin.BLE.Android.CallbackEventArgs\DescriptorCallbackEventArgs.cs" />
+    <Compile Include="Plugin.BLE.Android.CallbackEventArgs\MtuRequestCallbackEventArgs.cs" />
+    <Compile Include="Plugin.BLE.Android.CallbackEventArgs\RssiReadCallbackEventArgs.cs" />
+    <Compile Include="Plugin.BLE.Android.CallbackEventArgs\ServicesDiscoveredCallbackEventArgs.cs" />
+    <Compile Include="Plugin.BLE.Android\Adapter.cs" />
+    <Compile Include="Plugin.BLE.Android\Characteristic.cs" />
+    <Compile Include="Plugin.BLE.Android\Descriptor.cs" />
+    <Compile Include="Plugin.BLE.Android\Device.cs" />
+    <Compile Include="Plugin.BLE.Android\GattCallback.cs" />
+    <Compile Include="Plugin.BLE.Android\IGattCallback.cs" />
+    <Compile Include="Plugin.BLE.Android\Service.cs" />
+    <Compile Include="Plugin.BLE.BroadcastReceivers\BluetoothStatusBroadcastReceiver.cs" />
+    <Compile Include="Plugin.BLE.BroadcastReceivers\BondStatusBroadcastReceiver.cs" />
+    <Compile Include="Plugin.BLE.Extensions\BluetoothStateExtension.cs" />
+    <Compile Include="Plugin.BLE.Extensions\CharacteristicWriteTypeExtension.cs" />
+    <Compile Include="Plugin.BLE.Extensions\GattWriteTypeExtension.cs" />
+    <Compile Include="Plugin.BLE.Extensions\ScanModeExtension.cs" />
+    <Compile Include="Plugin.BLE\BleImplementation.cs" />
+    <Compile Include="Plugin.BLE\CrossBluetoothLE.cs" />
+    <Compile Include="Plugin.BLE\DefaultTrace.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
