@@ -15,11 +15,18 @@ env/
 .DS_Store
 Thumbs.db
 
-# Logs only (keep CSV/db/pair configs — this is a dev share repo)
+# Logs
 *.log
 
-# Do not commit machine SSH public key helper
+# Machine-local SSH helper (never commit)
 GITHUB_SSH_KEY.md
 
-# Optional huge OS packages if dropped in tree (rare)
+# Re-extracted RE dumps (findings live in datasheets/**/*.md — do not re-add bulk)
+datasheets/**/decompiled_*/
+datasheets/**/manifest_extract/
+datasheets/**/extracted/
+datasheets/**/tools/
+*.apk
+*.apkm
+*.jar
 *.jmod
