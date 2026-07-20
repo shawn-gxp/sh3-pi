@@ -141,6 +141,8 @@ def _reading_to_row(obj: Any, brand: str) -> Dict[str, Any]:
         )
         if d.get("is_control_solution"):
             row["reading_type"] = "meta"
+    elif d.get("weight_kg") is not None or d.get("weight") is not None:
+        row["reading_type"] = "weight"
     elif d.get("type") in (
         "ack",
         "nack",
@@ -169,7 +171,7 @@ def _f(v: Any) -> Optional[float]:
 
 
 def _is_clinical(row: Dict[str, Any]) -> bool:
-    return row.get("reading_type") in ("bp", "spo2", "temp", "glucose")
+    return row.get("reading_type") in ("bp", "spo2", "temp", "glucose", "weight")
 
 
 def _ts_key(row: Optional[Dict[str, Any]]) -> str:
@@ -1305,20 +1307,15 @@ def build_dashboard(
     macs: Optional[List[str]] = None,
     highlight_mac: str = "",
 ) -> Dict[str, Any]:
-    """All devices side-by-side with latest clinical + cycle highlight."""
+    """All devices side-by-side with latest clinical."""
     board = db.dashboard_board(macs=macs)
     hm = (highlight_mac or "").strip().upper()
-    cs = cycle_status()
     for card in board:
         mac = (card.get("mac") or "").upper()
-        card["active"] = bool(cs.get("active") and mac == hm)
+        card["active"] = bool(mac == hm and hm)
         card["slot_status"] = "reading" if card["active"] else "idle"
+        card["online"] = card["active"]
         
-        card["online"] = False
-        for res in cs.get("last_results", []):
-            if (res.get("mac") or "").upper() == mac:
-                card["online"] = bool(res.get("ok"))
-                break
         # Attach compact vitals for UI
         latest = card.get("latest") or {}
         card["vitals"] = {
@@ -1335,20 +1332,17 @@ def build_dashboard(
     return {
         "ok": True,
         "board": board,
-        "cycle": cs,
         "count": len(board),
     }
 
 
 def _push_dashboard(highlight_mac: str = "") -> None:
-    """Fan-out multi-device board (+ cycle state) to all WS clients."""
+    """Fan-out multi-device board to all WS clients."""
     if not _live_queues:
         return
     payload = {
         "type": "dashboard",
-        "dashboard": build_dashboard(
-            highlight_mac=highlight_mac or _cycle_status.get("current_mac") or ""
-        ),
+        "dashboard": build_dashboard(highlight_mac=highlight_mac),
     }
     dead: List[asyncio.Queue] = []
     for q in list(_live_queues):
@@ -1520,7 +1514,7 @@ async def job_cycle_start(
                     try:
                         listen = _listen_for_brand(brand_id, slot)
                         last_push = [0.0]
-                        def _on_live():
+                        def _on_live(mac=mac):
                             now_t = _time.monotonic()
                             if now_t - last_push[0] > 0.5:
                                 _push_dashboard(highlight_mac=mac)
@@ -1779,9 +1773,16 @@ async def job_nipro_handsfree_start(
                 row = _reading_to_row(obj, "nipro")
                 if not _is_clinical(row):
                     return
-                # Best-effort device id by MAC unknown in callback — store without device
+                # Best-effort device id by MAC
+                mac = (row.get("payload", {}).get("address") or row.get("payload", {}).get("mac") or getattr(obj, "address", "") or "").upper()
+                dev_id = None
+                if mac:
+                    dev_row = db.get_device_by_mac(mac)
+                    if dev_row:
+                        dev_id = dev_row.get("id")
+                        
                 rid = db.insert_reading(
-                    device_id=None,
+                    device_id=dev_id,
                     session_id=None,
                     brand="nipro",
                     reading_type=row["reading_type"],

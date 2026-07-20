@@ -170,6 +170,7 @@ def start() -> bool:
                     _cfg.get("hub_id"),
                     _cfg.get("topic"),
                 )
+                _drain_outbox_async()
             else:
                 log.error("MQTT connect failed rc=%s", rc)
 
@@ -223,12 +224,41 @@ def _heartbeat_loop() -> None:
             log.debug("heartbeat: %s", exc)
 
 
-def _publish_raw(topic: str, payload: dict, qos: Optional[int] = None) -> bool:
+def _drain_outbox_async():
+    def _drain():
+        try:
+            from db import pop_mqtt_outbox # type: ignore
+            items = pop_mqtt_outbox(limit=20)
+            if items:
+                log.info("[MQTT] draining %d items from outbox", len(items))
+            for item in items:
+                try:
+                    payload = json.loads(item["payload_json"])
+                    _publish_raw(item["topic"], payload, qos=item["qos"], bypass_outbox=True)
+                    time.sleep(0.05)
+                except Exception:
+                    pass
+        except Exception as e:
+            log.warning("MQTT outbox drain error: %s", e)
+    threading.Thread(target=_drain, name="mqtt-outbox", daemon=True).start()
+
+
+def _publish_raw(topic: str, payload: dict, qos: Optional[int] = None, bypass_outbox: bool = False) -> bool:
     global _client
-    if _client is None:
-        return False
     q = int(qos if qos is not None else _cfg.get("qos") or 1)
     body = json.dumps(payload, default=str)
+    
+    if _client is None or not _connected:
+        log.warning("[MQTT] not connected, publish failed topic=%s", topic)
+        if not bypass_outbox:
+            try:
+                from db import insert_mqtt_outbox # type: ignore
+                insert_mqtt_outbox(topic, body, qos=q)
+                log.info("[MQTT] queued message to outbox")
+            except Exception as dbe:
+                log.error("[MQTT] outbox insert failed: %s", dbe)
+        return False
+
     try:
         info = _client.publish(topic, body, qos=q, retain=False)
         # paho returns MQTTMessageInfo
@@ -241,15 +271,28 @@ def _publish_raw(topic: str, payload: dict, qos: Optional[int] = None) -> bool:
             log.info("[MQTT] published topic=%s bytes=%d", topic, len(body))
         else:
             log.warning("[MQTT] publish rc issue topic=%s info=%s", topic, info)
+            if not bypass_outbox:
+                try:
+                    from db import insert_mqtt_outbox # type: ignore
+                    insert_mqtt_outbox(topic, body, qos=q)
+                except Exception:
+                    pass
         return bool(ok)
     except Exception as exc:
         log.warning("[MQTT] publish failed topic=%s: %s", topic, exc)
+        if not bypass_outbox:
+            try:
+                from db import insert_mqtt_outbox # type: ignore
+                insert_mqtt_outbox(topic, body, qos=q)
+                log.info("[MQTT] queued message to outbox")
+            except Exception as dbe:
+                log.error("[MQTT] outbox insert failed: %s", dbe)
         return False
 
 
 def publish_heartbeat() -> None:
     """Match EnhancedMqttManager.publishHeartbeat → hub/{hubId}/heartbeat."""
-    cfg = _cfg or _load_cfg()
+    cfg = _load_cfg()
     hub_id = str(cfg.get("hub_id") or "unknown")
     payload = {
         "hubId": hub_id,
@@ -303,7 +346,7 @@ def publish_clinical_reading(
 
     Returns number of MQTT messages sent.
     """
-    cfg = _cfg or _load_cfg()
+    cfg = _load_cfg()
     if not cfg.get("enabled"):
         return 0
     if _client is None:
@@ -325,9 +368,18 @@ def publish_clinical_reading(
         or brand
         or mac_u
     )
-    hub_id = str(cfg.get("hub_id") or "pi-hub")
-    patient_id = str(cfg.get("patient_id") or "unassigned")
+    hub_id = str(cfg.get("hub_id") or "unknown")
     topic = str(cfg.get("topic") or "health/readings")
+
+    patient_id = ""
+    try:
+        from db import get_setting # type: ignore
+        patient_id = get_setting("patient_id")
+    except Exception:
+        pass
+    if not patient_id:
+        patient_id = str(cfg.get("patient_id") or "")
+
     ts = _utc_ts(measured_at)
 
     messages: List[Dict[str, Any]] = []
@@ -339,6 +391,7 @@ def publish_clinical_reading(
             "patientId": patient_id,
             "deviceName": name,
             "timestamp": ts,
+            "recorded_at": ts,
             "brand": brand or dev.get("brand") or "",
             "mac": mac_u,
             "dataType": "health_reading",

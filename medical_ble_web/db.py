@@ -109,6 +109,15 @@ def init_db(path: Path = DB_PATH) -> None:
                 value TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS mqtt_outbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                qos INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE INDEX IF NOT EXISTS idx_readings_mac ON readings(device_id, measured_at);
             CREATE INDEX IF NOT EXISTS idx_devices_brand ON devices(brand);
             """
@@ -602,3 +611,30 @@ def get_setting(key: str, default: str = "") -> str:
             "SELECT value FROM settings WHERE key = ?", (key,)
         ).fetchone()
         return str(row["value"]) if row else default
+
+
+def insert_mqtt_outbox(topic: str, payload_json: str, qos: int = 1) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO mqtt_outbox (topic, payload_json, qos, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (topic, payload_json, qos, _now()),
+        )
+
+
+def pop_mqtt_outbox(limit: int = 20) -> List[Dict[str, Any]]:
+    """Returns up to `limit` outbox items and deletes them from the outbox."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, topic, payload_json, qos, attempts FROM mqtt_outbox ORDER BY id ASC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        
+        items = [dict(r) for r in rows]
+        if items:
+            ids = ",".join(str(i["id"]) for i in items)
+            conn.execute(f"DELETE FROM mqtt_outbox WHERE id IN ({ids})")
+        return items
+

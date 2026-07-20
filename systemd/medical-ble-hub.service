@@ -43,6 +43,13 @@ KillSignal=SIGTERM
 # Hardening (keep BLE/network usable)
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/sh3/Desktop/sh3-hw-layer-experiments/medical_ble_web/data
+
+# Resource Limits
+MemoryMax=400M
+TasksMax=128
+WatchdogSec=120
 
 # Logging → journalctl -u medical-ble-hub
 StandardOutput=journal

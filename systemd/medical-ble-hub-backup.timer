@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Medical BLE Hub Database Backup every hour
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=60min
+Persistent=true
+Unit=medical-ble-hub-backup.service
+
+[Install]
+WantedBy=timers.target

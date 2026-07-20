@@ -63,7 +63,8 @@ chmod +x \
   "$REPO/hub_watchdog.sh" \
   "$REPO/hub_open_ui.sh" \
   "$REPO/start_hub.sh" \
-  "$REPO/run_web.sh"
+  "$REPO/run_web.sh" \
+  "$REPO/hub_db_backup.sh"
 
 # --- Render unit files with absolute paths / correct user ---
 render_unit() {
@@ -86,6 +87,10 @@ render_unit "$REPO/systemd/medical-ble-hub-watchdog.timer" \
   "$UNIT_DIR/medical-ble-hub-watchdog.timer"
 render_unit "$REPO/systemd/medical-ble-hub-ui.service" \
   "$UNIT_DIR/medical-ble-hub-ui.service"
+render_unit "$REPO/systemd/medical-ble-hub-backup.service" \
+  "$UNIT_DIR/medical-ble-hub-backup.service"
+render_unit "$REPO/systemd/medical-ble-hub-backup.timer" \
+  "$UNIT_DIR/medical-ble-hub-backup.timer"
 
 # Desktop autostart (login session) — works with auto-login
 AUTOSTART_DIR="$HUB_HOME/.config/autostart"
@@ -109,6 +114,7 @@ fi
 systemctl daemon-reload
 systemctl enable medical-ble-hub.service
 systemctl enable medical-ble-hub-watchdog.timer
+systemctl enable medical-ble-hub-backup.timer
 # UI on screen needs a graphical session (auto-login desktop recommended)
 systemctl enable medical-ble-hub-ui.service 2>/dev/null || true
 
@@ -116,6 +122,7 @@ systemctl enable medical-ble-hub-ui.service 2>/dev/null || true
 systemctl restart bluetooth.service 2>/dev/null || true
 systemctl restart medical-ble-hub.service
 systemctl restart medical-ble-hub-watchdog.timer
+systemctl restart medical-ble-hub-backup.timer
 # Open UI now if display is available
 systemctl start medical-ble-hub-ui.service 2>/dev/null || true
 
