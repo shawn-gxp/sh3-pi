@@ -5,33 +5,38 @@ Tools for **finding, pairing, and reading** smart medical devices over
 
 | Platform | Docs | Launch |
 |----------|------|--------|
-| **Linux** | [LINUX.md](LINUX.md) | `./setup_linux.sh` → `./run_web.sh` |
+| **Linux / Pi** | [LINUX.md](LINUX.md) | `./setup_linux.sh` → `./start_hub.sh` (or `./run_web.sh`) |
 | **Windows** | below | `.\run_web.ps1` / `python -m medical_ble_toolkit` |
+| **Execution plan** | [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | Phased Pi hub production work |
 
 ## Active layout
 
 | Path | Role |
 |------|------|
-| `medical_ble_toolkit/` | Multi-brand BLE toolkit + **hub** duty-cycle daemon |
-| `medical_ble_web/` | FastAPI UI → http://127.0.0.1:8741 |
-| `omron_bp/` | Omron FE4A pairing / EEPROM readout package |
-| `datasheets/` | Protocol PDFs, architecture notes, distilled findings (MD/JSON) |
+| `medical_ble_toolkit/` | **Standalone** multi-brand BLE HAL + hub + bundled Omron (`omron_bp/`) |
+| `medical_ble_web/` | FastAPI UI → http://127.0.0.1:8741 (depends **only** on toolkit) |
+| `datasheets/` | Protocol PDFs, architecture notes (reference only — not a runtime dep) |
 | `phoneblelog/` | Omron HCI findings + btsnoop helpers |
-| `hub_config.json` | Pi hub timings (Mighty 20s / 5s dash exit / prefer others) |
 | `ble_discover_loop.py` | Optional continuous AD watch (Linux debug) |
+
+Hub timings: `medical_ble_toolkit/hub_config.json` (or `$MEDICAL_HUB_CONFIG`).
 
 ## Linux quick start
 
 ```bash
 ./setup_linux.sh
-./run_web.sh          # browser: http://127.0.0.1:8741
+./start_hub.sh        # BLE on + web on LAN → http://<pi-ip>:8741
+# boot without login (once):
+sudo ./install_boot_service.sh
+# or:
+./run_web.sh          # same; HOST=127.0.0.1 for local-only
 # optional CLI:
 ./run_toolkit.sh
 ./setup_bluez_hub.sh  # BlueZ agent / hub helpers
 ```
 
 Hub Auto-sync: Pair devices on this host only → leave hub running → measure.
-MightySat uses a **duty-cycle** (valid SpO2 up to 20s, drop after 5s of `-`, then hunt NBP/NT/Omron). See `hub_config.json` and [LINUX.md](LINUX.md).
+MightySat uses a **duty-cycle** (valid SpO2 up to 20s, drop after 5s of `-`, then hunt NBP/NT/Omron). See `medical_ble_toolkit/hub_config.json` and [LINUX.md](LINUX.md).
 
 ## Findings & datasheets (kept)
 
@@ -45,18 +50,17 @@ Upstream references (not vendored here):
 - [omblepy](https://github.com/userx14/omblepy) — classic Omron CLI
 - [hass-omron](https://github.com/eigger/hass-omron) — Home Assistant Omron profiles
 
-Logic from those projects lives in `omron_bp/` and `medical_ble_toolkit/`.
+Logic from those projects lives in `medical_ble_toolkit/` (Omron under `medical_ble_toolkit/omron_bp/`).
 
 ## Windows
 
 ```powershell
 python -m pip install -r requirements.txt
 python -m pip install -r medical_ble_web\requirements.txt
-python -m pip install -r omron_bp\requirements.txt
 .\run_web.ps1
 # or:
 python -m medical_ble_toolkit
-python -m omron_bp pair -d HEM-7143T1 -m E1:99:7D:27:1C:0A
+python -m medical_ble_toolkit omron pair -d HEM-7143T1 -a E1:99:7D:27:1C:0A
 ```
 
 ## Notes

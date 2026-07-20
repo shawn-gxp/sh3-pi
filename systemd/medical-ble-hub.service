@@ -1,0 +1,53 @@
+[Unit]
+Description=Medical BLE Hub (web UI + multi-device auto-sync)
+Documentation=file:///home/sh3/Desktop/sh3-hw-layer-experiments/LINUX.md
+# Start after networking stack + BlueZ; do not require network-online (offline LAN still ok)
+After=network-pre.target NetworkManager.service bluetooth.service
+Wants=NetworkManager.service bluetooth.service
+# If the box has no NetworkManager, still boot the hub
+StartLimitIntervalSec=400
+StartLimitBurst=15
+
+[Service]
+Type=simple
+User=sh3
+Group=sh3
+# BlueZ D-Bus access without a logged-in desktop session
+SupplementaryGroups=bluetooth plugdev
+
+WorkingDirectory=/home/sh3/Desktop/sh3-hw-layer-experiments
+
+# Appliance env
+Environment=HOST=0.0.0.0
+Environment=PORT=8741
+Environment=SKIP_INSTALL=1
+Environment=PYTHONUNBUFFERED=1
+Environment=SKIP_BLUEZ_AGENT=1
+Environment=MEDICAL_NIPRO_REGISTRY=/home/sh3/Desktop/sh3-hw-layer-experiments/medical_ble_web/data/nipro_paired_devices.json
+Environment=PYTHONPATH=/home/sh3/Desktop/sh3-hw-layer-experiments
+
+# Prepare WiFi radio + BLE power (never fail the unit if adapter is slow)
+ExecStartPre=/home/sh3/Desktop/sh3-hw-layer-experiments/hub_prestart.sh
+
+# Main process: BLE hub web (blocks)
+ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/start_hub.sh
+
+# --- Guardrails: auto-recover after crash / OOM / unclean stop ---
+Restart=always
+RestartSec=5
+# Give bleak/BlueZ time to release on stop
+TimeoutStopSec=45
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Hardening (keep BLE/network usable)
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging → journalctl -u medical-ble-hub
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=medical-ble-hub
+
+[Install]
+WantedBy=multi-user.target

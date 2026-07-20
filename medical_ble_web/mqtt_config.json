@@ -1,0 +1,13 @@
+{
+  "_comment": "Drop-in hub MQTT config (mirrors android-hub mqtt_config.json + hard-coded hub/patient). Edit hub_id / patient_id / broker for your cloud.",
+  "enabled": true,
+  "broker": "tcp://172.16.2.185:1883",
+  "username": "admin",
+  "password": "admin123",
+  "topic": "health/readings",
+  "hub_id": "pi-hub-sh3-01",
+  "patient_id": "00000000-0000-0000-0000-000000000001",
+  "qos": 1,
+  "heartbeat_s": 30,
+  "clinical_types": ["bp", "temp", "spo2", "glucose"]
+}

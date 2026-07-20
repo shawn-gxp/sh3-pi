@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Medical BLE Hub health check every minute
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=15s
+Persistent=true
+Unit=medical-ble-hub-watchdog.service
+
+[Install]
+WantedBy=timers.target

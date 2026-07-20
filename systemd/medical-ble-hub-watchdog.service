@@ -1,0 +1,10 @@
+[Unit]
+Description=Medical BLE Hub health watchdog (restart if HTTP dead)
+After=medical-ble-hub.service
+
+[Service]
+Type=oneshot
+User=root
+Environment=PORT=8741
+Environment=MEDICAL_HUB_UNIT=medical-ble-hub.service
+ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/hub_watchdog.sh

@@ -2,7 +2,7 @@
 
 Local-only proof-of-concept UI for the medical BLE toolkit.
 
-- **Does not modify** `medical_ble_toolkit` (CLI stays as-is)
+- **Depends only on** `medical_ble_toolkit` (standalone HAL — no sibling packages)
 - **FastAPI** backend on `127.0.0.1:8741`
 - **SQLite** at `data/poc.db`
 - **All brands** from the interactive CLI catalog

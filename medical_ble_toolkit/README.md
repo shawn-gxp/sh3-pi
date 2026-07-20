@@ -3,19 +3,32 @@
 Python prototype HAL for proprietary smart medical devices.  
 **Parsers are pure logic** so the Android team can port them to Kotlin without touching BLE APIs.
 
-## Omron (from earlier `omron_bp` project)
+## Standalone package
 
-This toolkit **bridges** the existing `experiments/omron_bp` package (pair + EEPROM
-read + 23 model catalog) instead of re-implementing the Omron protocol.
+`medical_ble_toolkit` is the **standalone BLE hardware layer**.  
+`medical_ble_web` depends only on this package (no sibling packages).
+
+Bundled internals:
+
+| Path | Role |
+|------|------|
+| `omron_bp/` | Omron pair / EEPROM transport / 23-model catalog |
+| `hub/` + `hub_config.json` | Pi multi-device hub duty-cycle |
+| `beurer/` | Beurer companion sessions + capabilities |
+| `nipro/` | Nipro pair registry + hands-free |
+| `parsers/` | Pure bytes → vitals (Kotlin-portable) |
+
+## Omron (bundled `omron_bp`)
 
 | Layer | Where |
 |-------|--------|
-| Pair / read / transport / catalog | `omron_bp/` (unchanged, production path) |
-| Record bytes → `BloodPressureReading` | `medical_ble_toolkit/parsers/omron.py` |
-| CLI facade | `python -m medical_ble_toolkit omron …` |
+| Pair / read / transport / catalog | `medical_ble_toolkit/omron_bp/` |
+| Record bytes → `BloodPressureReading` | `parsers/omron.py` |
+| Public facade | `omron_bridge.py` (`pair_omron` / `read_omron` / `unpair_omron`) |
+| CLI | `python -m medical_ble_toolkit omron …` |
 
 ```powershell
-# List Omron models (same catalog as python -m omron_bp list-models)
+# List Omron models
 python -m medical_ble_toolkit omron list-models
 
 # Pair once — cuff flashing P
@@ -23,6 +36,9 @@ python -m medical_ble_toolkit omron pair -d HEM-7143T1 -a E1:99:7D:27:1C:0A
 
 # Read history — short-press BT (transfer mode, not P)
 python -m medical_ble_toolkit omron read -d HEM-7143T1 -a E1:99:7D:27:1C:0A -o .\data
+
+# Optional low-level Omron CLI
+python -m medical_ble_toolkit.omron_bp list-models
 ```
 
 Offline parse of one 14-byte EEPROM slot:
@@ -32,8 +48,6 @@ from medical_ble_toolkit.parser import parse_omron_record
 r = parse_omron_record(bytes.fromhex("5142511a9216bb1480005a004fb0"), model="HEM-7143T1")
 print(r.systolic, r.diastolic, r.pulse_rate, r.measured_at)
 ```
-
-You can still use `python -m omron_bp` directly; both share the same code.
 
 ---
 
@@ -66,7 +80,7 @@ You can still use `python -m omron_bp` directly; both share the same code.
 
 ### Beurer multi-device (APK catalog, OCR excluded)
 
-Interactive brand **Beurer** loads `datasheets/beurer/tools/device_registry.json`
+Interactive brand **Beurer** loads package-local `beurer/device_registry.json` (or synthesizes from `beurer/capabilities.json`)
 (~118 models): BP, glucose, FT thermo, PO60, scales, ECG combo, trackers.
 
 Companion-app timing + stability lives in `medical_ble_toolkit/beurer/`:
@@ -140,16 +154,16 @@ medical_ble_toolkit/
 ```powershell
 # Windows
 pip install -r requirements.txt
-pip install -r omron_bp\requirements.txt
+pip install -r medical_ble_web\requirements.txt
 ```
 
 ```bash
 # Linux (BlueZ) — see also ../LINUX.md
 ./setup_linux.sh
-# or: pip install -r requirements.txt -r omron_bp/requirements.txt
+# or: pip install -r requirements.txt -r medical_ble_web/requirements.txt
 ```
 
-`requirements.txt` already lists `bleak`. Works on **Windows (WinRT)** and **Linux (BlueZ)**.
+Root `requirements.txt` lists `bleak` (only runtime dep for the toolkit). Works on **Windows (WinRT)** and **Linux (BlueZ)**.
 
 ---
 

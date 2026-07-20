@@ -1,20 +1,20 @@
 """
-Omron brand adapter — bridges the earlier ``omron_bp`` project into this toolkit.
+Omron brand adapter — facade over in-package ``medical_ble_toolkit.omron_bp``.
 
 Architecture
 ------------
-  medical_ble_toolkit          omron_bp (sibling package)
-  -------------------------    --------------------------------
-  omron_bridge.py          →   pairing.service.pair_device
-                           →   readout.service.read_device_records
-                           →   models.registry (23+ profiles)
-  parsers/omron.py         →   models.parsers (pure record decode)
+  medical_ble_toolkit
+  -------------------------
+  omron_bridge.py          →   omron_bp.pairing.service.pair_device
+                           →   omron_bp.readout.service.read_device_records
+                           →   omron_bp.models.registry (23+ profiles)
+  parsers/omron.py         →   omron_bp.models.parsers (pure record decode)
   models.BloodPressureReading  ← dict {sys,dia,bpm,mov,ihb,datetime}
 
-BLE connection lifecycle for Omron stays in omron_bp (proprietary EEPROM
-protocol). This module only:
+BLE connection lifecycle for Omron lives in ``omron_bp/`` (proprietary EEPROM
+protocol), vendored inside this package. This module only:
   1. Resolves model
-  2. Calls pair / read workflows
+  2. Calls pair / read / unpair workflows
   3. Maps results to shared dataclasses
   4. Optional CSV export via omron_bp.export
 
@@ -37,17 +37,15 @@ log = logging.getLogger("medical_ble.omron")
 
 def _require_omron_bp():
     try:
-        import omron_bp  # noqa: F401
-        from omron_bp.models.registry import get_profile, list_models
-        from omron_bp.pairing.service import pair_device
-        from omron_bp.readout.service import read_device_records
-        from omron_bp.export.csv_export import write_users_csv
+        import medical_ble_toolkit.omron_bp as omron_bp  # noqa: F401
+        from medical_ble_toolkit.omron_bp.models.registry import get_profile, list_models
+        from medical_ble_toolkit.omron_bp.pairing.service import pair_device
+        from medical_ble_toolkit.omron_bp.readout.service import read_device_records
+        from medical_ble_toolkit.omron_bp.export.csv_export import write_users_csv
     except ImportError as exc:
         raise ImportError(
-            "Omron support needs the sibling package `omron_bp`.\n"
-            "  cd experiments\n"
-            "  python -m pip install -r omron_bp\\requirements.txt\n"
-            "Ensure you run from the experiments folder so both packages import."
+            "Omron support requires medical_ble_toolkit.omron_bp "
+            "(bundled under medical_ble_toolkit/omron_bp/)."
         ) from exc
     return get_profile, list_models, pair_device, read_device_records, write_users_csv
 
@@ -79,6 +77,15 @@ def resolve_omron_model(model: str):
     return get_profile(model)
 
 
+async def unpair_omron(address: str) -> None:
+    """Remove OS bond for an Omron cuff (BlueZ/WinRT)."""
+    from medical_ble_toolkit.omron_bp.ble.connection import unpair_address
+
+    log.info("[OMRON] UNPAIR address=%s ts=%s", address, ms_timestamp())
+    await unpair_address(address)
+    log.info("[OMRON] UNPAIR finished address=%s ts=%s", address, ms_timestamp())
+
+
 async def pair_omron(
     address: str,
     model: str,
@@ -96,7 +103,7 @@ async def pair_omron(
       Remove existing OS bond first (needed when Windows shows the cuff but
       GattSession flaps ACTIVE/CLOSED — stale bond).
     """
-    from omron_bp.pairing.service import pair_device as pair_device_fn
+    from medical_ble_toolkit.omron_bp.pairing.service import pair_device as pair_device_fn
 
     profile = resolve_omron_model(model)
     log.info(
@@ -215,6 +222,7 @@ __all__ = [
     "list_omron_models",
     "resolve_omron_model",
     "pair_omron",
+    "unpair_omron",
     "read_omron",
     "flatten_readings",
     "parse_omron_record",

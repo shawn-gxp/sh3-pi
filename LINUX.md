@@ -33,8 +33,7 @@ python3 -m virtualenv .venv   # or: python3 -m venv .venv
 .venv/bin/pip install -U pip
 .venv/bin/pip install \
   -r requirements.txt \
-  -r medical_ble_web/requirements.txt \
-  -r omron_bp/requirements.txt
+  -r medical_ble_web/requirements.txt
 ```
 
 Or:
@@ -48,8 +47,125 @@ chmod +x setup_linux.sh run_web.sh run_toolkit.sh
 
 ```bash
 ./run_web.sh
-# → http://127.0.0.1:8741
+# Pi / LAN (default): bind 0.0.0.0 — phone on same WiFi:
+#   http://<pi-ip>:8741
+# Local only:
+#   HOST=127.0.0.1 ./run_web.sh
 ```
+
+### Pi appliance start (manual)
+
+```bash
+./start_hub.sh
+# best-effort: WiFi radio + bluetooth power on → web hub on 0.0.0.0:8741
+```
+
+### Start at boot (no login) — systemd
+
+One-time (after `./setup_linux.sh` and WiFi configured to auto-join):
+
+```bash
+sudo ./install_boot_service.sh
+```
+
+This installs:
+
+| Unit | Role |
+|------|------|
+| `medical-ble-hub.service` | On multi-user boot: BLE/WiFi prep → web hub + auto-sync |
+| `medical-ble-hub-watchdog.timer` | Every ~60s: if `http://127.0.0.1:8741/health` fails → restart hub |
+
+**Guardrails (power loss / crash):**
+
+- `Restart=always` — process crash or reboot after power loss starts the hub again
+- Watchdog restarts if the HTTP port dies but the process hung
+- SQLite **WAL** mode (app) — safer after unclean power cut
+- BlueZ `AutoEnable=true` when install can edit `main.conf`
+- User added to `bluetooth` / `plugdev` groups for BLE without desktop login
+
+```bash
+sudo systemctl status medical-ble-hub
+sudo journalctl -u medical-ble-hub -f
+sudo systemctl restart medical-ble-hub
+# disable boot start:
+sudo systemctl disable --now medical-ble-hub medical-ble-hub-watchdog.timer
+```
+
+**WiFi at boot:** configure NetworkManager once (GUI, `nmtui`, or `nmcli`) so the SSID is set to auto-connect. The service turns WiFi radio on and waits briefly for NM; it does not store WiFi passwords itself.
+
+**Phone URL after boot:** `http://<pi-ip>:8741`
+
+### Open local website on the Pi screen
+
+After hub is healthy, open Chromium kiosk on the attached display:
+
+```bash
+./hub_open_ui.sh
+# normal window instead of full screen:
+HUB_UI_KIOSK=0 ./hub_open_ui.sh
+```
+
+Re-run install to enable boot/UI wiring:
+
+```bash
+sudo ./install_boot_service.sh
+```
+
+That installs:
+
+1. **`medical-ble-hub-ui.service`** — starts with `graphical.target` after the hub  
+2. **`~/.config/autostart/medical-ble-hub-ui.desktop`** — opens UI when the desktop session starts  
+
+**Requirement:** a graphical session on boot (auto-login). On Ubuntu/Pi desktop:
+
+- Settings → Users → Automatic Login for your user, **or**  
+- `sudo raspi-config` → System → Auto Login (Pi OS)
+
+Without auto-login, the **hub server still runs headless**; the browser only opens after someone logs into the desktop (or you run `./hub_open_ui.sh` manually).
+
+```bash
+sudo apt-get install -y chromium-browser   # if missing
+```
+
+### MQTT cloud transfer (Android hub drop-in)
+
+Pi publishes clinical SQLite rows to MQTT like the SHHM Android hub.
+
+Config file: `medical_ble_web/mqtt_config.json`
+
+| Key | Default (edit these) |
+|-----|----------------------|
+| `broker` | `tcp://172.16.2.100:1883` (from APK assets) |
+| `username` / `password` | `admin` / `admin123` |
+| `topic` | `health/readings` |
+| `hub_id` | `pi-hub-sh3-01` (**hard-coded hub**) |
+| `patient_id` | `00000000-0000-0000-0000-000000000001` (**hard-coded patient**) |
+| `enabled` | `true` |
+
+- **sensorId** = device **MAC** (uppercase)
+- On each new clinical insert (`bp` / `temp` / `spo2` / `glucose`) → publish
+- Heartbeat every 30s → `hub/{hub_id}/heartbeat`
+- Also mirrors to `patient/{patient_id}/sensor/{mac}/data`
+- Local SQLite always kept; MQTT failures never block BLE
+
+```bash
+# after editing mqtt_config.json:
+sudo systemctl restart medical-ble-hub
+curl -s http://127.0.0.1:8741/health | python3 -m json.tool | grep -A20 mqtt
+```
+
+### Hub matching (MAC-strict)
+
+Auto-sync only starts a session when a **paired** roster entry’s **MAC** appears in a scan.  
+It does **not** bind “any NBP” to the only NBP in the list. Two devices of the same brand need their own saved MACs.
+
+### Data locations
+
+| Data | Path |
+|------|------|
+| SQLite (source of truth) | `medical_ble_web/data/poc.db` |
+| Paired export (mirror) | `medical_ble_web/data/paired_devices.json` |
+| Nipro exact-name registry | `medical_ble_web/data/nipro_paired_devices.json` (or `$MEDICAL_NIPRO_REGISTRY`) |
 
 ## Run — Interactive CLI
 

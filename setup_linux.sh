@@ -34,8 +34,7 @@ fi
 .venv/bin/pip install -U pip
 .venv/bin/pip install \
   -r requirements.txt \
-  -r medical_ble_web/requirements.txt \
-  -r omron_bp/requirements.txt
+  -r medical_ble_web/requirements.txt
 
 echo ""
 echo "Bluetooth check:"

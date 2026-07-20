@@ -1,4 +1,5 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 pydantic>=2.0.0
+paho-mqtt>=1.6.1
 # BLE stack lives in parent experiments/requirements.txt (bleak)

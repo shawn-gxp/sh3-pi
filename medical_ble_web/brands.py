@@ -174,30 +174,36 @@ ADVANCED_BRANDS: List[Dict[str, Any]] = [
 BRANDS: List[Dict[str, Any]] = list(TIER1_BRANDS) + list(ADVANCED_BRANDS)
 
 
-def get_brand(brand_id: str) -> Optional[Dict[str, Any]]:
+# Aliases → canonical brand id (stored in SQLite / hub roster)
+_BRAND_ALIASES = {
+    "nt100b": "nipro_nt100b",
+    "thermo": "nipro_nt100b",
+    "thermometer": "nipro_nt100b",
+    "nbp": "nipro_nbp",
+    "nbp1": "nipro_nbp",
+    "nmbp": "nipro_nmbp",
+    "nsm": "nipro_nsm1",
+    "nsm1": "nipro_nsm1",
+    "cocoron": "nipro_cf",
+    "nipro": "nipro_nbp",
+    "mightysat": "masimo",
+    "spo2": "masimo",
+    "hem7143t1": "omron",
+    "hem-7143t1": "omron",
+}
+
+
+def canonicalize_brand_id(brand_id: str) -> str:
+    """Map legacy / short ids to the catalog brand id."""
     bid = (brand_id or "").strip().lower()
+    return _BRAND_ALIASES.get(bid, bid)
+
+
+def get_brand(brand_id: str) -> Optional[Dict[str, Any]]:
+    bid = canonicalize_brand_id(brand_id)
     for b in BRANDS:
         if b["id"] == bid:
             return b
-    aliases = {
-        "nt100b": "nipro_nt100b",
-        "thermo": "nipro_nt100b",
-        "thermometer": "nipro_nt100b",
-        "nbp": "nipro_nbp",
-        "nbp1": "nipro_nbp",
-        "nmbp": "nipro_nmbp",
-        "nsm": "nipro_nsm1",
-        "nsm1": "nipro_nsm1",
-        "cocoron": "nipro_cf",
-        "nipro": "nipro_nbp",
-        "mightysat": "masimo",
-        "spo2": "masimo",
-        "hem7143t1": "omron",
-        "hem-7143t1": "omron",
-    }
-    bid2 = aliases.get(bid)
-    if bid2:
-        return get_brand(bid2)
     return None
 
 

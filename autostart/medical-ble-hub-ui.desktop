@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Medical BLE Hub UI
+Comment=Open local hub dashboard after login
+Exec=/home/sh3/Desktop/sh3-hw-layer-experiments/hub_open_ui.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
+StartupNotify=false

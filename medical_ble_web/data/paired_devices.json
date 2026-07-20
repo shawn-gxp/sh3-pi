@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-20 12:32:33.709",
+  "devices": [
+    {
+      "mac": "E1:99:7D:27:1C:0A",
+      "name": "HEM-7143T1",
+      "brand": "omron",
+      "model": "HEM-7143T1",
+      "paired": true
+    },
+    {
+      "mac": "C0:26:DA:1B:11:46",
+      "name": "NT-100B",
+      "brand": "nipro_nt100b",
+      "model": "NT-100B",
+      "paired": true
+    },
+    {
+      "mac": "C9:51:E9:BB:E2:22",
+      "name": "MightySat",
+      "brand": "masimo",
+      "model": "MightySat",
+      "paired": true
+    },
+    {
+      "mac": "6C:EC:EB:45:6F:6A",
+      "name": "NBP-1BLE",
+      "brand": "nipro_nbp",
+      "model": "NBP-1BLE",
+      "paired": true
+    }
+  ]
+}

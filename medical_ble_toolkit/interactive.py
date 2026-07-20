@@ -110,7 +110,7 @@ BRANDS: List[BrandChoice] = [
         connect_profile="nipro_nt100b",
         default_model="NT-100B",
         notes="げんきノート path. TICD history lab: profile thermometer.",
-    )
+    ),
     BrandChoice(
         id="fora",
         label="FORA 6 Connect (RE scaffold)",
@@ -798,7 +798,7 @@ async def _run_generic_pair(
 
     if force_rebind and os_pair_supported():
         try:
-            from omron_bp.ble.connection import unpair_address
+            from medical_ble_toolkit.omron_bridge import unpair_omron as unpair_address
 
             print("  Removing previous OS bond (best effort)…")
             await unpair_address(address)

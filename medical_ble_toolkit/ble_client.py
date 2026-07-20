@@ -159,6 +159,7 @@ async def scan_devices(
     timeout: float = 8.0,
     *,
     retries: int = 3,
+    quiet_busy: bool = False,
 ) -> List[BLEDevice]:
     """
     Discover peripherals; optionally filter by profile name hints / company ID.
@@ -166,6 +167,9 @@ async def scan_devices(
     On Windows the advertisement watcher often starts ABORTED when another app
     held the radio or a previous scan did not release cleanly. We retry a few
     times with a short pause instead of failing in <100ms.
+
+    quiet_busy: hub mode — BlueZ InProgress is expected during connect; log at
+    debug/warning only (no multi-line ERROR diagnosis spam).
 
     Returns an empty list on total scanner failure (never crashes the CLI);
     callers can still prompt for a MAC — connect uses BLEDevice (no scan).
@@ -183,7 +187,7 @@ async def scan_devices(
             "in Quick Settings and no other app holds exclusive access.",
             tag,
         )
-    elif is_linux():
+    elif is_linux() and not quiet_busy:
         log.info(
             "[%s] Using BlueZ. Adapter must be powered "
             "(bluetoothctl power on). Close other scanners if scan fails.",
@@ -202,15 +206,24 @@ async def scan_devices(
         except (asyncio.TimeoutError, BleakError, OSError) as exc:
             last_exc = exc
             busy = _is_scanner_busy(exc)
-            log.warning(
-                "[SCAN] attempt %d failed: %s: %s",
-                attempt,
-                type(exc).__name__,
-                exc,
-            )
-            _log_winrt(exc, operation=f"scan(attempt={attempt})")
+            if quiet_busy and busy:
+                log.warning(
+                    "[SCAN] attempt %d/%d busy (BlueZ InProgress) — %s",
+                    attempt,
+                    attempts,
+                    exc,
+                )
+            else:
+                log.warning(
+                    "[SCAN] attempt %d failed: %s: %s",
+                    attempt,
+                    type(exc).__name__,
+                    exc,
+                )
+                if not (quiet_busy and busy):
+                    _log_winrt(exc, operation=f"scan(attempt={attempt})")
             if attempt < attempts:
-                delay = 2.0 * attempt
+                delay = (1.0 * attempt) if (quiet_busy and busy) else (2.0 * attempt)
                 reason = "scanner/radio busy" if busy else "transient scan error"
                 log.info(
                     "[SCAN] %s — waiting %.1fs before retry…",
@@ -223,21 +236,28 @@ async def scan_devices(
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
             log.error("[SCAN] unexpected %s: %s", type(exc).__name__, exc)
-            _log_winrt(exc, operation=f"scan(attempt={attempt})")
+            if not quiet_busy:
+                _log_winrt(exc, operation=f"scan(attempt={attempt})")
             break
 
     if devices is None:
-        log.error(
-            "Scan failed after %d attempt(s) — adapter off / permissions / "
-            "scanner busy.",
-            attempts,
-        )
-        if last_exc is not None:
-            _log_winrt(last_exc, operation="scan")
-        log.error(
-            "[%s] Connect still works without scan: pass the MAC address directly.",
-            ble_log_tag(),
-        )
+        if quiet_busy and last_exc is not None and _is_scanner_busy(last_exc):
+            log.warning(
+                "[SCAN] skipped — radio busy (connect in progress). "
+                "Will retry next hunt round."
+            )
+        else:
+            log.error(
+                "Scan failed after %d attempt(s) — adapter off / permissions / "
+                "scanner busy.",
+                attempts,
+            )
+            if last_exc is not None:
+                _log_winrt(last_exc, operation="scan")
+            log.error(
+                "[%s] Connect still works without scan: pass the MAC address directly.",
+                ble_log_tag(),
+            )
         return []
 
     results: List[BLEDevice] = []
@@ -815,7 +835,7 @@ class MedicalBleClient:
         try:
             if is_linux():
                 # BlueZ needs a pair agent or AuthenticationFailed/Canceled
-                from omron_bp.ble.connection import pair_client as _omron_pair
+                from .omron_bp.ble.connection import pair_client as _omron_pair
 
                 await _omron_pair(self._client)
             else:

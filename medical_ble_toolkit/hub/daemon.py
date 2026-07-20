@@ -28,7 +28,6 @@ from .config import HubConfig, load_hub_config
 from .connection_manager import ConnectionManager
 from .policy import (
     TIER1_BRANDS,
-    brand_matches_adv,
     classify_brand,
     is_always_on,
     is_stream,
@@ -282,24 +281,33 @@ class HubDaemon:
     async def _scan_once(self) -> List[Any]:
         from medical_ble_toolkit.ble_client import scan_devices
 
+        # BlueZ: discovery + connect at the same time → org.bluez.Error.InProgress.
+        # Pause hunt scans for a short quiet window after each worker starts.
+        quiet_s = float(getattr(self.cfg, "scan_quiet_after_spawn_s", 12.0) or 12.0)
+        if self.conn_mgr._connect_mutex.locked():
+            log.debug("[HUB] skip scan — connect gate held")
+            return []
+        if self.conn_mgr.any_younger_than(quiet_s):
+            log.debug(
+                "[HUB] skip scan — worker still in connect/setup window (%.0fs)",
+                quiet_s,
+            )
+            return []
+
         async def _do() -> List[Any]:
             try:
                 return list(
                     await scan_devices(
                         profile=None,
                         timeout=float(self.cfg.scan_chunk_s),
-                        retries=1,
+                        retries=2,
+                        quiet_busy=True,
                     )
                     or []
                 )
             except Exception as exc:  # noqa: BLE001
                 log.warning("[HUB] scan failed: %s", exc)
                 return []
-
-        # Never scan while a connect is in progress (BlueZ InProgress)
-        if self.conn_mgr._connect_mutex.locked():
-            log.debug("[HUB] skip scan — connect in progress")
-            return []
 
         if self.radio_lock is not None:
             # Non-blocking try: if UI holds lock, skip this hunt round
@@ -315,32 +323,41 @@ class HubDaemon:
         scanned: List[Any],
         now: float,
     ) -> List[SessionTarget]:
+        """
+        MAC-strict matching for multi-device hubs.
+
+        Only the roster MAC starts a session. Exact-name hits on a *different*
+        MAC are logged and ignored (never rebind). Brand-hint "steal any AD"
+        is intentionally removed — two NBPs must not cross-connect.
+        """
         by_mac = {
             (getattr(d, "address", "") or "").strip().upper(): d for d in scanned
         }
         hits: List[SessionTarget] = []
         for d in roster:
-            mac = d["mac"]
+            mac = (d.get("mac") or "").strip().upper()
             brand = d["brand"]
+            if not mac:
+                continue
             if self.conn_mgr.is_busy(mac):
                 continue
             if self._in_cooldown(mac, brand, now):
                 continue
             adv = by_mac.get(mac)
-            name = d.get("name") or ""
-            if adv is None:
+            name = (d.get("name") or "").strip()
+            if adv is None and name:
+                # Diagnostic only: same advertised name on wrong MAC
                 for smac, sd in by_mac.items():
-                    sname = getattr(sd, "name", None) or ""
-                    if name and sname.strip() == name:
-                        adv = sd
-                        mac = smac
+                    sname = (getattr(sd, "name", None) or "").strip()
+                    if sname and sname == name and smac != mac:
+                        log.warning(
+                            "[HUB] MAC-strict: name %r seen at %s but roster "
+                            "MAC is %s — not binding",
+                            name,
+                            smac,
+                            mac,
+                        )
                         break
-                    if brand_matches_adv(brand, name=sname):
-                        same = [x for x in roster if x["brand"] == brand]
-                        if len(same) == 1 and not self.conn_mgr.is_busy(smac):
-                            adv = sd
-                            mac = smac
-                            break
             if adv is None:
                 continue
             # Duty-cycle: after Mighty releases, skip Masimo briefly so others
@@ -663,8 +680,14 @@ class HubDaemon:
                         ),
                     )
                     await asyncio.sleep(float(self.cfg.idle_sleep_s))
+                elif spawned > 0:
+                    # Give BlueZ time to finish connect before next discovery
+                    settle = float(
+                        getattr(self.cfg, "post_spawn_settle_s", 2.0) or 2.0
+                    )
+                    await asyncio.sleep(max(settle, float(self.cfg.idle_sleep_s)))
                 else:
-                    # Workers running — short idle then re-hunt for more ADs
+                    # Workers already running — short idle then re-hunt
                     await asyncio.sleep(float(self.cfg.idle_sleep_s))
 
             # Shutdown: wait for workers

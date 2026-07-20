@@ -1,6 +1,6 @@
 # Device support matrix (hardware + data collection)
 
-**Project:** `medical_ble_toolkit` (+ `omron_bp` for Omron)  
+**Project:** `medical_ble_toolkit` (Omron bundled as `medical_ble_toolkit/omron_bp`)  
 **Scope:** BLE connect, bond/pair, session timing, history/stream collect, parse to structured vitals.  
 **Out of scope:** cloud, accounts, charts, OCR/camera, clinical claims, full companion-app UI.
 
@@ -192,8 +192,8 @@ These appear in the companion catalog as advertisement/storage names (often EU /
 
 ## 2. Omron
 
-**Sources:** `omron_bp` model catalog + live lab path for HEM-7143T1.  
-**CLI:** `python -m medical_ble_toolkit` → Omron, or `python -m omron_bp`.
+**Sources:** `medical_ble_toolkit/omron_bp` model catalog + live lab path for HEM-7143T1.  
+**CLI:** `python -m medical_ble_toolkit` → Omron, or `python -m medical_ble_toolkit.omron_bp`.
 
 ### Region suffix cheat-sheet (approximate)
 
@@ -248,7 +248,7 @@ These appear in the companion catalog as advertisement/storage names (often EU /
 | HEM-7136T | SH3 / SH variants | B |
 | HEM-7151T | -Z | B |
 
-Full alias lists: `python -m omron_bp list-models` / catalog in `omron_bp/models/profiles/catalog.py`.
+Full alias lists: `python -m medical_ble_toolkit.omron_bp list-models` / catalog in `omron_bp/models/profiles/catalog.py`.
 
 ---
 
@@ -351,7 +351,7 @@ python -m medical_ble_toolkit nipro wait -t 3600
 |----------|------|
 | `datasheets/beurer/tools/device_registry.json` | Beurer model / adv names / categories |
 | `medical_ble_toolkit/beurer/capabilities.json` | APK `mo.*` per-model flags |
-| `omron_bp/models/profiles/catalog.py` | Omron profiles + aliases |
+| `medical_ble_toolkit/omron_bp/models/profiles/catalog.py` | Omron profiles + aliases |
 | `medical_ble_toolkit/profiles.py` | Toolkit BLE profiles |
 | This file | Human-facing support matrix |
 

@@ -36,6 +36,13 @@ def reset_db(path: Path = DB_PATH) -> None:
             conn.execute("DELETE FROM sqlite_sequence")
         except sqlite3.OperationalError:
             pass
+    try:
+        export_paired_devices(path)
+    except OSError:
+        pass
+
+
+PAIRED_EXPORT_PATH = DATA_DIR / "paired_devices.json"
 
 
 def init_db(path: Path = DB_PATH) -> None:
@@ -106,12 +113,82 @@ def init_db(path: Path = DB_PATH) -> None:
             CREATE INDEX IF NOT EXISTS idx_devices_brand ON devices(brand);
             """
         )
+    migrate_brand_ids(path)
+    export_paired_devices(path)
+
+
+def migrate_brand_ids(path: Path = DB_PATH) -> int:
+    """
+    One-time / startup normalize of legacy brand ids in SQLite.
+
+    Lab DB used thermo / and for Tier-1 Nipro meters; hub policy expects
+    nipro_nt100b / nipro_nbp.
+    """
+    if not Path(path).is_file():
+        return 0
+    n = 0
+    with connect(path) as conn:
+        for sql in (
+            "UPDATE devices SET brand='nipro_nt100b' "
+            "WHERE lower(brand) IN ('thermo','thermometer','nt100b')",
+            "UPDATE devices SET brand='nipro_nbp' "
+            "WHERE lower(brand)='and' AND ("
+            "  upper(ifnull(model,'')) LIKE '%NBP%' OR "
+            "  upper(ifnull(name,'')) LIKE '%NBP%'"
+            ")",
+            "UPDATE devices SET brand='masimo' "
+            "WHERE lower(brand) IN ('mightysat','spo2')",
+        ):
+            cur = conn.execute(sql)
+            n += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    return n
+
+
+def export_paired_devices(path: Path = DB_PATH) -> Path:
+    """
+    Mirror SQLite devices → data/paired_devices.json (human backup).
+
+    SQLite remains source of truth for the hub roster.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    devices: List[Dict[str, Any]] = []
+    if Path(path).is_file():
+        with connect(path) as conn:
+            rows = conn.execute(
+                "SELECT brand, model, mac, name, paired FROM devices "
+                "ORDER BY updated_at DESC"
+            ).fetchall()
+            for r in rows:
+                devices.append(
+                    {
+                        "mac": (r["mac"] or "").upper(),
+                        "name": r["name"] or "",
+                        "brand": r["brand"] or "",
+                        "model": r["model"] or "",
+                        "paired": bool(r["paired"]),
+                    }
+                )
+    payload = {
+        "version": 1,
+        "updated_at": _now(),
+        "devices": devices,
+    }
+    out = PAIRED_EXPORT_PATH
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return out
 
 
 @contextmanager
 def connect(path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(str(path), check_same_thread=False)
+    # timeout: wait on locks (concurrent hub workers + web)
+    conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.Error:
+        pass
     try:
         yield conn
         conn.commit()
@@ -365,7 +442,30 @@ def insert_reading(
                 _now(),
             ),
         )
-        return int(cur.lastrowid)
+        rid = int(cur.lastrowid)
+
+    # Cloud transfer (Android hub drop-in) — never fail local insert
+    try:
+        from mqtt_bridge import notify_reading_inserted  # type: ignore
+
+        notify_reading_inserted(
+            reading_id=rid,
+            device_id=device_id,
+            brand=brand,
+            reading_type=reading_type,
+            measured_at=measured,
+            systolic=systolic,
+            diastolic=diastolic,
+            pulse_rate=pulse_rate,
+            spo2=spo2,
+            temperature=temperature,
+            glucose_mg_dl=glucose_mg_dl,
+            perfusion_index=perfusion_index,
+        )
+    except Exception:
+        pass
+
+    return rid
 
 
 def list_readings(

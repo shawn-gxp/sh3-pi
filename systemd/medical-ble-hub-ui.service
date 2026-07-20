@@ -1,0 +1,26 @@
+[Unit]
+Description=Medical BLE Hub — open local UI on screen
+Documentation=file:///home/sh3/Desktop/sh3-hw-layer-experiments/LINUX.md
+After=medical-ble-hub.service graphical.target
+Wants=medical-ble-hub.service
+# Only make sense when a display session exists
+Requires=medical-ble-hub.service
+
+[Service]
+Type=oneshot
+User=sh3
+Group=sh3
+# Default local display (auto-login desktop / lightdm / gdm)
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/sh3/.Xauthority
+Environment=PORT=8741
+Environment=HUB_UI_KIOSK=1
+Environment=HUB_UI_WAIT_S=120
+WorkingDirectory=/home/sh3/Desktop/sh3-hw-layer-experiments
+ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/hub_open_ui.sh
+RemainAfterExit=yes
+# Do not tear down the whole stack if browser fails
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=graphical.target

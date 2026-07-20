@@ -351,6 +351,8 @@ async def job_pair(
     if not brand:
         raise ValueError(f"Unknown brand: {brand_id}")
 
+    # Always store canonical id (thermo→nipro_nt100b, etc.)
+    brand_id = brand["id"]
     model = model or brand.get("default_model") or ""
     mac_u = mac.strip().upper()
     adv_name = (name or model or brand.get("default_model") or "").strip()
@@ -391,7 +393,7 @@ async def job_pair(
             paired=True,
         )
         # Nipro companion registry (exact name + CheckPairing id)
-        if brand.get("is_nipro") or brand_id.startswith("nipro"):
+        if brand.get("is_nipro") or brand_id.startswith("nipro") or brand_id == "masimo":
             try:
                 from medical_ble_toolkit.nipro.registry import register_meter
 
@@ -404,6 +406,10 @@ async def job_pair(
                 )
             except Exception as exc:  # noqa: BLE001
                 log.warning("nipro registry register skip: %s", exc)
+        try:
+            db.export_paired_devices()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("paired export: %s", exc)
         db.end_session(sid, "ok")
         out: Dict[str, Any] = {
             "ok": True,
@@ -467,7 +473,7 @@ async def _generic_pair(
 
     if force_rebind and os_pair_supported():
         try:
-            from omron_bp.ble.connection import unpair_address
+            from medical_ble_toolkit.omron_bridge import unpair_omron as unpair_address
 
             await unpair_address(mac)
             await asyncio.sleep(1.0)
@@ -521,6 +527,7 @@ async def job_sync(
     stream_good_hold_s: Optional[float] = None,
     stream_invalid_exit_s: Optional[float] = None,
     stream_no_data_grace_s: float = 8.0,
+    find_timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     One-shot read/sync for the brand; store clinical readings in SQLite.
@@ -528,6 +535,7 @@ async def job_sync(
     exclusive_radio=True  — hold global BLE lock (UI / single-session).
     exclusive_radio=False — concurrent hub workers (multi BleakClient).
     stream_*: MightySat hub duty-cycle (valid SpO2 hold / "-" exit).
+    find_timeout: override post-measure BLE hunt (hub passes 0 — MAC known).
     """
     brand = get_brand(brand_id)
     if not brand:
@@ -735,14 +743,17 @@ async def job_sync(
                             if on_reading_cb:
                                 on_reading_cb()
 
-                # Post-measure: hub already saw AD → short connect retries only.
-                # Long find_window eats the ~65s BLE window (NBP got 0 readings).
-                find_to = 0.0
+                # Post-measure: hub already saw AD → prefer direct MAC connect.
+                # Long find_window + parallel hub scan → BlueZ InProgress.
                 name_hint = (
                     (dev_row.get("name") or model or brand.get("default_model") or "")
                 ).strip()
                 connect_retries = 2 if not is_thermo else 1
                 connect_to = 30.0 if is_thermo else 35.0
+                if find_timeout is not None:
+                    find_to = max(0.0, float(find_timeout))
+                else:
+                    find_to = 0.0
                 if (
                     brand.get("is_nipro")
                     or brand_id.startswith("nipro")
@@ -752,17 +763,23 @@ async def job_sync(
 
                     if brand_id != "masimo":
                         duration = max(duration, pm.receive_s_for(profile_id))
-                    # Brief retry only (device just advertised)
-                    find_to = 12.0 if (is_nipro_bp or is_thermo or brand_id == "masimo") else 0.0
-                    connect_retries = 4 if find_to > 0 else connect_retries
+                    # Manual UI Sync: short hunt. Hub passes find_timeout=0.
+                    if find_timeout is None:
+                        find_to = (
+                            12.0
+                            if (is_nipro_bp or is_thermo or brand_id == "masimo")
+                            else 0.0
+                        )
+                    connect_retries = 4 if find_to > 0 else max(connect_retries, 3)
                     connect_to = 12.0 if find_to > 0 else connect_to
                     log.info(
                         "[POST-MEASURE] web sync find=%.0fs receive=%.0fs profile=%s "
-                        "pair=%s",
+                        "pair=%s exclusive=%s",
                         find_to,
                         duration,
                         profile_id,
                         do_pair,
+                        exclusive_radio,
                     )
 
                 client = MedicalBleClient(
@@ -1853,7 +1870,7 @@ async def job_nipro_handsfree_stop() -> Dict[str, Any]:
 #   HUNT (scan) → SESSION (one device) → HUNT
 #   NBP / NT / MightySat: connect on advertisement
 #   Omron: editable poll (default 5 min) + opportunistic AD
-#   Config: hub_config.json (repo root) or $MEDICAL_HUB_CONFIG
+#   Config: medical_ble_toolkit/hub_config.json (or cwd / $MEDICAL_HUB_CONFIG)
 # ---------------------------------------------------------------------------
 
 _daemon_task: Optional[asyncio.Task] = None
@@ -1888,12 +1905,9 @@ def _daemon_now() -> str:
 
 
 def _hub_roster() -> List[Dict[str, Any]]:
-    """Paired Tier-1 devices from SQLite."""
+    """Paired devices from SQLite only (never unpaired scan leftovers)."""
     devices = db.list_devices()
-    paired = [d for d in devices if d.get("paired")]
-    if not paired:
-        paired = [d for d in devices if d.get("mac") and d.get("brand")]
-    return paired
+    return [d for d in devices if d.get("paired") and d.get("mac") and d.get("brand")]
 
 
 async def _hub_run_session(target: Any) -> Dict[str, Any]:
@@ -1959,6 +1973,8 @@ async def _hub_run_session(target: Any) -> Dict[str, Any]:
                 stream_good_hold_s=good_hold,
                 stream_invalid_exit_s=inv_exit,
                 stream_no_data_grace_s=grace,
+                # Hub already matched AD — direct MAC connect (no nested scan)
+                find_timeout=0.0,
             )
             stored = int(result.get("stored") or 0)
             had_valid = bool(result.get("had_valid_spo2"))
@@ -1999,6 +2015,8 @@ async def _hub_run_session(target: Any) -> Dict[str, Any]:
             listen_s=listen,
             on_reading_cb=_on_reading,
             exclusive_radio=False,
+            # Hub roster MAC already known — avoid parallel BlueZ discovery
+            find_timeout=0.0,
         )
         if cfg.print_readings:
             for row in (result.get("readings") or [])[:30]:
@@ -2143,7 +2161,7 @@ async def job_daemon_start(*, duration_s: float = 86400.0 * 7) -> Dict[str, Any]
         ),
         "tips": list(HUB_ONLY_PAIR_TIPS),
         "daemon": daemon_status(),
-        "config_path": "hub_config.json",
+        "config_path": "medical_ble_toolkit/hub_config.json",
     }
 
 

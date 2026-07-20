@@ -5,10 +5,10 @@ Load order:
   1. path argument
   2. $MEDICAL_HUB_CONFIG
   3. ./hub_config.json  (cwd)
-  4. <repo>/hub_config.json
+  4. medical_ble_toolkit/hub_config.json  (package default)
   5. built-in defaults
 
-Edit hub_config.json — no code change needed for Omron interval etc.
+Edit medical_ble_toolkit/hub_config.json — no code change needed for Omron interval etc.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from typing import Any, Dict, Optional
 
 log = logging.getLogger("medical_ble.hub.config")
 
-# Repo root: medical_ble_toolkit/hub/config.py → ../../
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+# Package root: medical_ble_toolkit/hub/config.py → ../
+_PKG_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_NAME = "hub_config.json"
 
 
@@ -65,6 +65,10 @@ class HubConfig:
     post_disconnect_settle_s: float = 0.15
     idle_sleep_s: float = 0.35
     health_log_every_s: float = 30.0
+    # BlueZ: do not StartDiscovery while a worker is still connecting/setup
+    scan_quiet_after_spawn_s: float = 12.0
+    # After spawning a worker, pause before next hunt loop
+    post_spawn_settle_s: float = 2.0
 
     # Session budgets (aligned to ~1m05s field windows)
     nbp_receive_s: float = 65.0
@@ -122,8 +126,7 @@ def default_config_path() -> Path:
     cwd = Path.cwd() / _DEFAULT_NAME
     if cwd.is_file():
         return cwd
-    repo = _REPO_ROOT / _DEFAULT_NAME
-    return repo
+    return _PKG_ROOT / _DEFAULT_NAME
 
 
 def _from_dict(data: Dict[str, Any]) -> HubConfig:
@@ -140,13 +143,13 @@ def _from_dict(data: Dict[str, Any]) -> HubConfig:
 
 
 def load_hub_config(path: Optional[Path | str] = None) -> HubConfig:
-    """Load config from JSON; missing file → defaults (and write template if repo path)."""
+    """Load config from JSON; missing file → defaults (and write template if package path)."""
     p = Path(path) if path else default_config_path()
     if not p.is_file():
         cfg = HubConfig()
         # Best-effort write so operators can edit without hunting defaults
         try:
-            if p.parent.exists() or p == _REPO_ROOT / _DEFAULT_NAME:
+            if p.parent.exists() or p == _PKG_ROOT / _DEFAULT_NAME:
                 save_hub_config(cfg, p)
                 log.info("Wrote default hub config → %s", p)
         except OSError as exc:

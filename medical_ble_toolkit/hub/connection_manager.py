@@ -73,6 +73,21 @@ class ConnectionManager:
     def is_busy(self, mac: str) -> bool:
         return mac.strip().upper() in self._active
 
+    def any_younger_than(self, window_s: float) -> bool:
+        """
+        True if any slot started less than window_s ago.
+
+        Used to pause hub discovery while a worker is still in connect /
+        GATT setup (BlueZ rejects parallel StartDiscovery → InProgress).
+        """
+        if window_s <= 0 or not self._active:
+            return False
+        now = time.monotonic()
+        for s in self._active.values():
+            if (now - s.started_mono) < window_s:
+                return True
+        return False
+
     async def try_acquire(self, mac: str, brand: str, reason: str = "") -> bool:
         """Reserve a slot for MAC. False if busy or pool full."""
         mac_u = mac.strip().upper()

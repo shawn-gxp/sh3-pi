@@ -354,7 +354,7 @@ PROFILES: dict[str, DeviceProfile] = {
         write_uuid="db5b55e0-aee7-11e1-965e-0002a5d5c51b",
         notes=(
             "NOT SIG BLP history. Use: python -m medical_ble_toolkit omron pair|read "
-            "-d HEM-7143T1 -a <MAC>. Backed by omron_bp (23 models, classic+modern)."
+            "-d HEM-7143T1 -a <MAC>. Backed by medical_ble_toolkit.omron_bp (23 models)."
         ),
     ),
     "hem7143t1": DeviceProfile(

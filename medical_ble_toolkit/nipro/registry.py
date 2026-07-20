@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -31,6 +32,10 @@ from ..parsers.nipro_common import (
 log = logging.getLogger("medical_ble.nipro.registry")
 
 STORE_NAME = "nipro_paired_devices.json"
+
+# Repo root: medical_ble_toolkit/nipro/registry.py → parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_DATA_DIR = _REPO_ROOT / "medical_ble_web" / "data"
 
 # category → default profile id
 CATEGORY_PROFILE = {
@@ -79,10 +84,61 @@ def normalize_device_id(device_id: str) -> str:
 
 
 def _path() -> Path:
-    return Path.cwd() / STORE_NAME
+    """
+    Fixed registry path (not CWD-dependent).
+
+    Priority:
+      1. $MEDICAL_NIPRO_REGISTRY
+      2. medical_ble_web/data/nipro_paired_devices.json (next to SQLite)
+    """
+    env = (os.environ.get("MEDICAL_NIPRO_REGISTRY") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    return _DEFAULT_DATA_DIR / STORE_NAME
+
+
+def _legacy_registry_candidates() -> List[Path]:
+    """Older locations used before fixed data/ path."""
+    return [
+        _REPO_ROOT / "medical_ble_web" / STORE_NAME,
+        _REPO_ROOT / STORE_NAME,
+        Path.cwd() / STORE_NAME,
+    ]
+
+
+def _ensure_registry_migrated() -> None:
+    """Copy first non-empty legacy registry into the fixed path if missing."""
+    # Never migrate into custom env paths or test patches
+    if (os.environ.get("MEDICAL_NIPRO_REGISTRY") or "").strip():
+        return
+    dest = _path()
+    default_dest = (_DEFAULT_DATA_DIR / STORE_NAME).resolve()
+    try:
+        if dest.resolve() != default_dest:
+            return
+    except OSError:
+        return
+    if dest.is_file():
+        return
+    for src in _legacy_registry_candidates():
+        try:
+            if not src.is_file():
+                continue
+            if src.resolve() == dest.resolve():
+                continue
+            text = src.read_text(encoding="utf-8")
+            if not text.strip():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(text, encoding="utf-8")
+            log.info("[NIPRO] migrated registry %s → %s", src, dest)
+            return
+        except OSError as exc:
+            log.debug("registry migrate skip %s: %s", src, exc)
 
 
 def load_registry() -> Dict[str, list]:
+    _ensure_registry_migrated()
     p = _path()
     if not p.is_file():
         return {"meters": []}
@@ -100,10 +156,16 @@ def load_registry() -> Dict[str, list]:
 def save_registry(data: Dict[str, list]) -> None:
     p = _path()
     try:
+        p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(data, indent=2), encoding="utf-8")
         log.info("[NIPRO] registry saved → %s (%d meter(s))", p, len(data.get("meters") or []))
     except OSError as exc:
         log.warning("Could not write %s: %s", p, exc)
+
+
+def registry_path() -> Path:
+    """Public path helper for admin reset / diagnostics."""
+    return _path()
 
 
 def list_meters() -> List[PairedMeter]:

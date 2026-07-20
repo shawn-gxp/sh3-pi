@@ -79,6 +79,16 @@ async def _startup() -> None:
     db.init_db()
     log.info("SQLite ready: %s", db.DB_PATH)
     log.info("Open http://127.0.0.1:8741")
+    # MQTT cloud transfer (Android hub drop-in) — hard-coded hub/patient in mqtt_config.json
+    try:
+        import mqtt_bridge
+
+        if mqtt_bridge.start():
+            log.info("MQTT bridge started: %s", mqtt_bridge.status())
+        else:
+            log.info("MQTT bridge off or broker unreachable: %s", mqtt_bridge.status())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("MQTT bridge start failed: %s", exc)
     # Hands-free: if any device is already paired, start auto-sync
     try:
         devices = db.list_devices()
@@ -93,6 +103,16 @@ async def _startup() -> None:
             log.info("No paired devices yet — auto-sync idle until Pair")
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not auto-start auto-sync: %s", exc)
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    try:
+        import mqtt_bridge
+
+        mqtt_bridge.stop()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +204,13 @@ async def health() -> Dict[str, Any]:
         }
     except Exception as exc:  # noqa: BLE001
         hub_cfg = {"error": str(exc)}
+    mqtt_st: Dict[str, Any] = {}
+    try:
+        import mqtt_bridge
+
+        mqtt_st = mqtt_bridge.status()
+    except Exception as exc:  # noqa: BLE001
+        mqtt_st = {"error": str(exc)}
     return {
         "ok": True,
         "service": "medical_ble_web",
@@ -192,6 +219,7 @@ async def health() -> Dict[str, Any]:
         "daemon": daemon_status(),
         "live": live_status(),
         "hub": hub_cfg,
+        "mqtt": mqtt_st,
     }
 
 
@@ -206,16 +234,33 @@ async def admin_reset() -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         log.warning("stop before reset: %s", exc)
     db.reset_db()
-    # Clear Nipro exact-name registry next to web app
-    reg = ROOT / "nipro_paired_devices.json"
+    # Clear fixed Nipro registry (medical_ble_web/data/… or $MEDICAL_NIPRO_REGISTRY)
     try:
-        reg.write_text('{"meters": []}\n', encoding="utf-8")
-    except OSError as exc:
+        from medical_ble_toolkit.nipro.registry import registry_path, save_registry
+
+        save_registry({"meters": []})
+        reg_path = str(registry_path())
+    except Exception as exc:  # noqa: BLE001
         log.warning("registry clear: %s", exc)
+        # Legacy fallback
+        reg = ROOT / "data" / "nipro_paired_devices.json"
+        try:
+            reg.parent.mkdir(parents=True, exist_ok=True)
+            reg.write_text('{"meters": []}\n', encoding="utf-8")
+            reg_path = str(reg)
+        except OSError as exc2:
+            log.warning("registry clear fallback: %s", exc2)
+            reg_path = ""
+    try:
+        db.export_paired_devices()
+    except OSError as exc:
+        log.warning("paired export clear: %s", exc)
     return {
         "ok": True,
         "message": "DB + nipro registry cleared. Re-pair devices on this hub only.",
         "db": str(db.DB_PATH),
+        "nipro_registry": reg_path,
+        "paired_export": str(db.PAIRED_EXPORT_PATH),
     }
 
 

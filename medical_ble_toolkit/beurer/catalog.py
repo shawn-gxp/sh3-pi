@@ -65,30 +65,110 @@ class BeurerDevice:
         return f"{self.id}  [{names}]"
 
 
+# Non-SKU keys that appear in capabilities.json (APK markers, not product models)
+_CAP_META_KEYS = frozenset(
+    {
+        "ActivityTracker",
+        "BloodGlucose",
+        "BloodPressure",
+        "DeviceScreenType",
+        "DeviceType",
+        "DisplayBrigthness",
+        "DisplayDuration",
+        "ECGDevice",
+        "HydrationManager",
+        "OCRSupported",
+        "PulseOxy",
+        "Scale",
+        "Thermometer",
+    }
+)
+
+
 def _registry_path() -> Path:
-    # medical_ble_toolkit/beurer/catalog.py → experiments/datasheets/beurer/tools/
-    here = Path(__file__).resolve()
-    candidates = [
-        here.parents[2] / "datasheets" / "beurer" / "tools" / "device_registry.json",
-        Path.cwd() / "datasheets" / "beurer" / "tools" / "device_registry.json",
-    ]
-    for p in candidates:
-        if p.is_file():
-            return p
-    return candidates[0]
+    """Package-local registry only (standalone toolkit)."""
+    return Path(__file__).resolve().parent / "device_registry.json"
+
+
+def _infer_category_protocol(model_id: str, caps: dict) -> tuple[str, str]:
+    """Map model id / capability flags → (primary_category, protocol_profile)."""
+    mid = (model_id or "").strip()
+    u = mid.upper()
+    if caps.get("ecg_combo") or u.startswith("ME") or u.startswith("ECG"):
+        return "ecg", "ecg_custom"
+    if u.startswith(("BM", "BC", "SERIES", "PREMIUM", "DELUXE", "ELITE", "AUTO", "QUICK", "SENSE", "IBC", "SRBM")):
+        return "blood_pressure", "bp_sig"
+    if u.startswith("GL"):
+        return "blood_glucose", "glucose_sig"
+    if u.startswith("FT"):
+        return "thermometer", "thermometer_sig"
+    if u.startswith("PO"):
+        return "pulse_oximeter", "pulse_ox"
+    if u.startswith(("BF", "GS", "SRBF")):
+        return "scale", "scale_mixed"
+    if u.startswith("AS"):
+        if "AS98" in u:
+            return "activity_tracker", "tracker_as98"
+        if "AS99" in u:
+            return "activity_tracker", "tracker_as99"
+        return "activity_tracker", "tracker_as87"
+    if u.startswith("DM"):
+        return "hydration", "hydration_dm20"
+    return "other", "bp_sig"
+
+
+def _registry_from_capabilities() -> dict:
+    """
+    Build a catalog from package-local capabilities.json when device_registry.json
+    is absent. Keeps medical_ble_toolkit standalone (no datasheets/ path).
+    """
+    from .capabilities import _raw_caps
+
+    raw_devices = _raw_caps().get("devices") or {}
+    devices: List[dict] = []
+    profiles: Dict[str, dict] = {}
+    ordinal = 0
+    for mid, caps in sorted(raw_devices.items(), key=lambda kv: kv[0].upper()):
+        if mid in _CAP_META_KEYS:
+            continue
+        if not isinstance(caps, dict):
+            continue
+        cat, proto = _infer_category_protocol(mid, caps)
+        ordinal += 1
+        devices.append(
+            {
+                "id": mid,
+                "storage_name": mid,
+                "advertisement_names": [mid],
+                "primary_category": cat,
+                "ble_scan_uuid": None,
+                "ocr_supported": False,
+                "ordinal": ordinal,
+                "discover": [],
+            }
+        )
+        slot = profiles.setdefault(proto, {"devices": []})
+        slot["devices"].append(mid)
+    return {
+        "source": "capabilities.json (auto catalog — no external device_registry.json)",
+        "devices": devices,
+        "profiles": profiles,
+    }
 
 
 @lru_cache(maxsize=1)
 def load_registry() -> dict:
     path = _registry_path()
-    if not path.is_file():
-        log.warning("Beurer device_registry.json not found at %s", path)
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        log.error("Failed to load Beurer registry: %s", exc)
-        return {}
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and (data.get("devices") or data.get("profiles")):
+                return data
+        except (OSError, json.JSONDecodeError) as exc:
+            log.error("Failed to load Beurer registry: %s", exc)
+    # Standalone fallback: synthesize from capabilities.json
+    log.info("Beurer catalog: using capabilities.json fallback (no %s)", path.name)
+    return _registry_from_capabilities()
 
 
 def _device_protocol(reg: dict, device_id: str) -> str:
