@@ -384,6 +384,8 @@ async def job_pair(
         # Pause hub hunt so BlueZ is free for OS pair / GATT
         async with _pause_hub_for_manual("repair" if repair else "pair"):
             if brand.get("is_omron"):
+                # Side-effect import registers OmronPlugin (see brands/__init__.py)
+                import medical_ble_toolkit.brands  # noqa: F401
                 from medical_ble_toolkit.core.registry import get_plugin
 
                 await get_plugin("omron").pair(mac_u, model, force_rebind=repair)

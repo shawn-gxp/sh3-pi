@@ -1,6 +1,10 @@
 """
 Active brand plugin registrations. Import a brand module here to activate it
 — this is the ONE file touched when adding a new brand.
+
+Brand plugins must not import omron_bridge / heavy facades at module top-level;
+that creates cycles with parsers → brands package init. Lazy-import inside
+plugin methods instead.
 """
 from .omron import plugin as _omron_plugin  # noqa: F401
 
