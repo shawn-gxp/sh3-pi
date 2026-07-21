@@ -1,8 +1,8 @@
 # Pi Medical BLE Hub — Execution Plan
 
-**Status:** Phase 0 + critical Phase 1 **implemented** (2026-07-20). P2+ not started.  
-**Date:** 2026-07-20  
-**Product:** Raspberry Pi appliance — WiFi + BLE hub + web UI (phone on same LAN) → SQLite → (later) MQTT  
+**Status:** Phase 0 + critical Phase 1 **implemented** (2026-07-20). MQTT publish path is live (P5 partial) but blocked by cloud ID contract — see **Known Issues**.  
+**Date:** 2026-07-20 (Known Issues updated 2026-07-21)  
+**Product:** Raspberry Pi appliance — WiFi + BLE hub + web UI (phone on same LAN) → SQLite → MQTT  
 
 ### Implementation log
 
@@ -11,8 +11,10 @@
 | P0 | **Done** | Roster paired-only, WAL, MAC-strict match, LAN bind, unit tests |
 | P1 | **Done** (core) | Fixed Nipro path, brand migrate, paired_devices.json export |
 | P2 | Not started | supported_devices.json |
-| P3 | **Partial** | `start_hub.sh` + LAN bind; systemd unit still optional |
-| P4–P6 | Not started | |
+| P3 | **Partial** | systemd appliance units in use on Pi; boot scripts present |
+| P4 | Not started | Driver facade |
+| P5 | **Partial** | `mqtt_bridge.py` publishes to `health/readings`; cloud ingest fails on hub/patient IDs — **§ Known Issues** |
+| P6 | Not started | Optional cleanup |
 
 ---
 
@@ -286,15 +288,20 @@ SQLite readings ──► dashboard
 
 | ID | Subtask | Notes |
 |----|---------|-------|
-| **P5.1** | Enable config already stubbed | `hub_config.json` `mqtt_enabled`, topic prefix |
-| **P5.2** | Publish on successful clinical insert | Payload from reading row + device mac/brand |
-| **P5.3** | Fail-open | MQTT down must not fail BLE session |
-| **P5.4** | Docs + smoke test with local broker |
+| **P5.1** | Enable config already stubbed | `medical_ble_web/mqtt_config.json` (broker, topic, hub/patient) |
+| **P5.2** | Publish on successful clinical insert | `mqtt_bridge.notify_reading_inserted` → `health/readings` |
+| **P5.3** | Fail-open | MQTT down must not fail BLE session (outbox + never raise) |
+| **P5.4** | Docs + smoke test with local broker | LINUX.md MQTT section |
+| **P5.5** | Align IDs with SHHM cloud | **Blocked** — see **Known Issues** (hub UUID / patient UUID). No cloud code changes; Pi adapts only. |
 
 ### Acceptance criteria (P5)
 
-- [ ] Readings always land in SQLite even if broker down  
-- [ ] Message schema versioned  
+- [x] Readings always land in SQLite even if broker down  
+- [ ] Message schema matches cloud `dataProcessingService` end-to-end (IDs must be cloud UUIDs)  
+- [ ] Cloud backend saves reading without Sequelize/Postgres UUID errors  
+- [ ] Heartbeat accepted for registered hub  
+
+**Do not mark P5 done until Known Issues KI-MQTT-01 / KI-MQTT-02 are closed.**
 
 ---
 
@@ -398,4 +405,162 @@ Before any code:
 
 ---
 
-*End of plan. Implementation is intentionally blocked until explicit go-ahead.*
+## 20. Known Issues
+
+> Open production / integration issues that are **documented only** until product owner schedules a fix.  
+> **Policy for MQTT cloud mismatch:** change **local Pi code/config only** — do not modify SHHM cloud backend.
+
+### KI-MQTT-01 — Cloud rejects readings: `hubId` is not a UUID
+
+| | |
+|---|---|
+| **Status** | Open (confirmed 2026-07-20 / 2026-07-21) |
+| **Severity** | High — MQTT messages arrive but are **not persisted** by cloud |
+| **Where** | SHHM Docker backend `dataProcessingService.js` → `Hub.findByPk(hubId)` |
+| **Local config** | `medical_ble_web/mqtt_config.json` → `"hub_id": "pi-hub-sh3-01"` |
+| **Local publisher** | `medical_ble_web/mqtt_bridge.py` → payload field `hubId` |
+
+#### Symptom (cloud log)
+
+```text
+MQTT message processing error: invalid input syntax for type uuid: "pi-hub-sh3-01"
+SequelizeDatabaseError code=22P02
+SQL: SELECT ... FROM "hubs" AS "Hub" WHERE "Hub"."id" = 'pi-hub-sh3-01';
+at processAndSaveReading (.../dataProcessingService.js:82)
+```
+
+Broker / Mosquitto config (listeners, TLS, clustering) is **not** the failure mode. Delivery works; **ingest** fails.
+
+#### Root cause
+
+| Side | Field | Value today | Cloud DB expectation |
+|------|--------|-------------|----------------------|
+| Pi hub | `hubId` / config `hub_id` | Human slug `pi-hub-sh3-01` | `hubs.id` column type **UUID** (Postgres) |
+| Cloud | `Hub.findByPk(hubId)` | — | PK lookup only |
+
+**Contract mismatch:** Pi treats hub id as a stable device label; cloud treats it as the primary key of the `hubs` table.
+
+#### What is already correct (do not “fix” as root cause)
+
+- Topic: `health/readings`
+- Reading shape: `type` / `dataType` (`TEMPERATURE`, `BLOOD_PRESSURE`, `SPO2`, `HEART_RATE`, …), `value`, `unit`, `data` (BP), `timestamp` / `recorded_at`, `sensorId` (MAC), optional vitals extras
+- Heartbeat topic shape: `hub/<hubId>/heartbeat` (same id must become UUID)
+- Fail-open local store: SQLite still saves clinical rows when cloud rejects
+
+#### Observed good payload (shape) with bad ids
+
+```json
+{
+  "type": "TEMPERATURE",
+  "dataType": "TEMPERATURE",
+  "value": 36.2,
+  "unit": "C",
+  "sensorId": "C0:26:DA:1B:11:46",
+  "hubId": "pi-hub-sh3-01",
+  "patientId": "0001",
+  "deviceName": "NT-100B",
+  "timestamp": "2026-07-21T09:22:00Z",
+  "recorded_at": "2026-07-21T09:22:00Z",
+  "brand": "nipro_nt100b",
+  "mac": "C0:26:DA:1B:11:46",
+  "localReadingId": 2940
+}
+```
+
+Cloud log: `MQTT Received: health/readings` → `Processing data: { hubId: 'pi-hub-sh3-01', ... }` → UUID error.
+
+#### Cloud contract (from SHHM backend review — no cloud edits)
+
+**Readings** — topic `health/readings`:
+
+| Field | Required | Notes |
+|-------|----------|--------|
+| `type` or `dataType` | Prefer set | `BLOOD_PRESSURE`, `HEART_RATE`, `SPO2`, `TEMPERATURE`, … |
+| `value` | Optional | Scalar; defaults to 0 if only `data` used |
+| `data` | Optional | Composite e.g. BP `{ systolic, diastolic }` |
+| `unit` | Optional | `mmHg`, `bpm`, `%`, `C`, … |
+| `timestamp` / `recorded_at` | Optional | Server time if missing |
+| `sensorId` | Required | Physical id / MAC — map to known sensor |
+| `patientId` | Optional | Patient **UUID**; if missing, cloud may resolve via sensor/hub |
+| `hubId` | Optional but used | Must be **`hubs.id` UUID** when provided — auto-create sensor / hub linkage |
+
+**Heartbeat** — topic `hub/<hubId>/heartbeat` (`hubId` parsed from topic path):
+
+- Payload is free-form status JSON stored on heartbeat row
+- Topic segment must still be the registered hub UUID if cloud keys heartbeats by hub PK
+
+**Outbound (cloud → broker):** alerts on `health/alerts` (Pi does not need to consume for this issue).
+
+#### Planned local-only fix (not implemented yet — P5.5)
+
+1. **Config:** set `mqtt_config.json` `hub_id` to the **real** `hubs.id` UUID from cloud Postgres/admin (hub row must exist first).
+2. **Optional display name:** keep a separate `hub_name` (e.g. `pi-hub-sh3-01`) for logs/UI only — never send as `hubId` if cloud uses UUID PK.
+3. **Code hardening** (`mqtt_bridge.py`):
+   - Validate `hub_id` is UUID-shaped before publish; log a clear error if not (avoid silent 22P02 loops).
+   - Prefer config `patient_id`; ignore non-UUID UI/setting values such as `0001`.
+   - **Omit** `patientId` when empty/invalid so cloud can auto-resolve (backend allows optional).
+4. Restart `medical-ble-hub` after config change; retest temperature/BP; confirm no Sequelize UUID errors and row appears in cloud Readings.
+
+#### Blocked on operator input
+
+- [ ] Cloud `hubs.id` UUID for this Pi  
+- [ ] Patient strategy: fixed patient UUID in config **or** omit `patientId` and rely on hub/sensor binding  
+- [ ] Confirm sensor MAC is known or auto-created under that hub  
+
+#### Explicit non-goals for this issue
+
+- Do **not** change SHHM/cloud Sequelize models or `findByPk`  
+- Do **not** change Mosquitto cluster/TLS as a “fix” for this error  
+- Do **not** block BLE or local SQLite on MQTT failure  
+
+---
+
+### KI-MQTT-02 — `patientId` override sends non-UUID (`0001`)
+
+| | |
+|---|---|
+| **Status** | Open (confirmed in same traces as KI-MQTT-01) |
+| **Severity** | Medium–High — next failure after hub UUID is fixed if patient column is UUID |
+| **Where** | Pi `mqtt_bridge.publish_clinical_reading` patient resolution |
+| **Cloud** | Optional field; if present and typed as UUID, Postgres will reject `0001` the same way |
+
+#### Root cause
+
+Publish order today:
+
+1. SQLite setting `patient_id` (hub UI) — currently can be short codes like **`0001`**
+2. Else `mqtt_config.json` `patient_id` (placeholder UUID)
+
+So the short clinic-style code **overrides** a better config value. Logs show `patientId: '0001'` even when config has a UUID placeholder.
+
+#### Planned local-only fix (with P5.5)
+
+- Prefer valid UUID from config, or  
+- If setting is not UUID-shaped, fall back to config / **omit** field  
+- Document: hub UI patient field must be cloud patient UUID when used  
+
+Depends on product choice for patient binding (see KI-MQTT-01 checklist).
+
+---
+
+### KI-MQTT-03 — P5 plan docs lag implementation
+
+| | |
+|---|---|
+| **Status** | Open (docs) |
+| **Severity** | Low |
+| **Notes** | Early plan marked MQTT as “later”; implementation already ships `mqtt_bridge.py`, outbox, heartbeat, and `LINUX.md` MQTT section. Track real blockers under KI-MQTT-01/02, not “MQTT not started”. |
+
+---
+
+### Known Issues — quick index
+
+| ID | One-line | Owner side | Fix phase |
+|----|----------|------------|-----------|
+| KI-MQTT-01 | Cloud `Hub.findByPk` rejects slug `pi-hub-sh3-01` (needs UUID) | **Pi config + bridge** | P5.5 |
+| KI-MQTT-02 | `patientId` `0001` from UI setting overrides config | **Pi bridge + settings** | P5.5 |
+| KI-MQTT-03 | Execution plan MQTT status outdated vs code | Docs | this section |
+
+---
+
+*End of plan. Known Issues are intentionally not auto-fixed; schedule P5.5 after cloud hub UUID and patient strategy are provided.*

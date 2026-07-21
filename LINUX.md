@@ -138,8 +138,8 @@ Config file: `medical_ble_web/mqtt_config.json`
 | `broker` | `tcp://172.16.2.100:1883` (from APK assets) |
 | `username` / `password` | `admin` / `admin123` |
 | `topic` | `health/readings` |
-| `hub_id` | `pi-hub-sh3-01` (**hard-coded hub**) |
-| `patient_id` | `00000000-0000-0000-0000-000000000001` (**hard-coded patient**) |
+| `hub_id` | Must be cloud **`hubs.id` UUID** (slug like `pi-hub-sh3-01` is rejected by Postgres) |
+| `patient_id` | Cloud patient **UUID**, or leave unset so cloud resolves via hub/sensor |
 | `enabled` | `true` |
 
 - **sensorId** = device **MAC** (uppercase)
@@ -147,6 +147,8 @@ Config file: `medical_ble_web/mqtt_config.json`
 - Heartbeat every 30s → `hub/{hub_id}/heartbeat`
 - Also mirrors to `patient/{patient_id}/sensor/{mac}/data`
 - Local SQLite always kept; MQTT failures never block BLE
+
+**Known issues (cloud ingest):** Pi currently may send non-UUID `hubId` / `patientId`; SHHM backend does `Hub.findByPk` on UUID column → readings arrive on MQTT but fail to save. Full write-up and local-only fix plan: **`EXECUTION_PLAN.md` § 20 Known Issues** (`KI-MQTT-01`, `KI-MQTT-02`). Do not change cloud code for this.
 
 ```bash
 # after editing mqtt_config.json:
