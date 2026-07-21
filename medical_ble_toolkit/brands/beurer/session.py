@@ -18,24 +18,24 @@ from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 
-from ..common.hexutil import format_hex_dump, ms_timestamp
-from ..common.winrt_errors import (
+from medical_ble_toolkit.common.hexutil import format_hex_dump, ms_timestamp
+from medical_ble_toolkit.common.winrt_errors import (
     is_windows,
     os_pair_supported,
     pairing_ui_hint,
     remove_bond_instructions,
 )
-from ..parser import get_parser
-from ..parsers.blood_pressure import (
+from medical_ble_toolkit.parser import get_parser
+from medical_ble_toolkit.parsers.blood_pressure import (
     BlpBloodPressureParser,
     encode_current_time_2a2b,
     parse_blood_pressure_measurement,
 )
-from ..parsers import glucose as glucose_mod
-from ..parsers import beurer_po60 as po60_mod
-from ..parsers import beurer_scale as scale_mod
-from ..models import DeviceBrand
-from ..profiles import DeviceProfile, get_profile
+from medical_ble_toolkit.parsers import glucose as glucose_mod
+from medical_ble_toolkit.parsers import beurer_po60 as po60_mod
+from medical_ble_toolkit.parsers import beurer_scale as scale_mod
+from medical_ble_toolkit.models import DeviceBrand
+from medical_ble_toolkit.profiles import DeviceProfile, get_profile
 from .capabilities import DeviceCapabilities, get_capabilities, mfg_data_suggests_passkey
 from .catalog import BeurerDevice, get_device
 from .dedup import bp_dedup_key, dedupe_readings, glucose_dedup_key

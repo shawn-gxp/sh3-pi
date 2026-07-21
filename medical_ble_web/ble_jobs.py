@@ -494,7 +494,7 @@ async def _generic_pair(
             log.warning("unpair skip: %s", exc)
 
     if brand_id == "beurer":
-        from medical_ble_toolkit.beurer.session import BeurerCompanionSession
+        from medical_ble_toolkit.brands.beurer.session import BeurerCompanionSession
 
         sess = BeurerCompanionSession(mac, model_id=model or "BM54", pair=True)
         result = await sess.run()
@@ -641,7 +641,7 @@ async def job_sync(
                     stored += 1
                     collected.append(row)
             elif brand_id == "beurer":
-                from medical_ble_toolkit.beurer.session import BeurerCompanionSession
+                from medical_ble_toolkit.brands.beurer.session import BeurerCompanionSession
 
                 sess = BeurerCompanionSession(
                     mac_u, model_id=model or "BM54", pair=True

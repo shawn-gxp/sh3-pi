@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from medical_ble_toolkit.beurer.catalog import (
+from medical_ble_toolkit.brands.beurer.catalog import (
     get_device,
     list_devices,
     match_advertisement_name,
@@ -45,7 +45,7 @@ class TestBeurerCatalog(unittest.TestCase):
 class TestBeurerTiming(unittest.TestCase):
     def test_bm59_pulse_swap_not_te(self):
         # APK: BM54 has te (3s settle); BM59 has t6 (pulse swap), not te
-        from medical_ble_toolkit.beurer.capabilities import get_capabilities
+        from medical_ble_toolkit.brands.beurer.capabilities import get_capabilities
 
         c54 = get_capabilities("BM54")
         c59 = get_capabilities("BM59")
@@ -56,7 +56,7 @@ class TestBeurerTiming(unittest.TestCase):
         self.assertEqual(c54.quiet_timeout_s, 4.0)
 
     def test_glucose_long_racp_mg_marker(self):
-        from medical_ble_toolkit.beurer.capabilities import get_capabilities
+        from medical_ble_toolkit.brands.beurer.capabilities import get_capabilities
 
         # only GL49/GL60 have mg in APK extract
         self.assertTrue(get_capabilities("GL60").glucose_long_racp)
@@ -112,7 +112,7 @@ class TestBeurerParsers(unittest.TestCase):
 
 class TestBeurerStability(unittest.TestCase):
     def test_dedup_bp(self):
-        from medical_ble_toolkit.beurer.dedup import dedupe_readings, bp_dedup_key
+        from medical_ble_toolkit.brands.beurer.dedup import dedupe_readings, bp_dedup_key
         from medical_ble_toolkit.parsers.blood_pressure import (
             parse_blood_pressure_measurement,
         )
@@ -127,7 +127,7 @@ class TestBeurerStability(unittest.TestCase):
         self.assertEqual(len(keys), 1)
 
     def test_sync_classify_pairing(self):
-        from medical_ble_toolkit.beurer.sync_result import classify_sync, SyncStatus
+        from medical_ble_toolkit.brands.beurer.sync_result import classify_sync, SyncStatus
 
         r = classify_sync(
             model_id="BM54",
@@ -143,7 +143,7 @@ class TestBeurerStability(unittest.TestCase):
         self.assertEqual(r.status, SyncStatus.PAIRING_REQUIRED)
 
     def test_mfg_passkey(self):
-        from medical_ble_toolkit.beurer.capabilities import mfg_data_suggests_passkey
+        from medical_ble_toolkit.brands.beurer.capabilities import mfg_data_suggests_passkey
 
         self.assertTrue(mfg_data_suggests_passkey({0x0611: bytes([0x01, 0x03])}))
         self.assertFalse(mfg_data_suggests_passkey({0x0611: bytes([0x01])}))
