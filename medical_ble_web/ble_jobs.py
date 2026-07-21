@@ -19,6 +19,7 @@ if str(_EXPERIMENTS) not in sys.path:
 
 from brands import get_brand, resolve_profile_id  # noqa: E402
 import db  # noqa: E402
+import medical_ble_toolkit.brands  # noqa: E402
 
 log = logging.getLogger("medical_ble_web.ble")
 
