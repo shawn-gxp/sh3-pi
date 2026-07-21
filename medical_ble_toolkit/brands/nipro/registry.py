@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from ..parsers.nipro_common import (
+from medical_ble_toolkit.parsers.nipro_common import (
     PREFIX_CF,
     PREFIX_MIGHTY,
     PREFIX_NBCM,

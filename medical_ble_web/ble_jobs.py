@@ -408,15 +408,20 @@ async def job_pair(
         # Nipro companion registry (exact name + CheckPairing id)
         if brand.get("is_nipro") or brand_id.startswith("nipro") or brand_id == "masimo":
             try:
-                from medical_ble_toolkit.nipro.registry import register_meter
+                if brand_id == "masimo":
+                    from medical_ble_toolkit.brands.nipro.registry import register_meter
 
-                register_meter(
-                    device_id=mac_u,
-                    name=adv_name or model,
-                    profile_id=profile_id,
-                    address=mac_u,
-                    serial="",
-                )
+                    register_meter(
+                        device_id=mac_u,
+                        name=adv_name or model,
+                        profile_id=profile_id,
+                        address=mac_u,
+                        serial="",
+                    )
+                else:
+                    from medical_ble_toolkit.core.registry import get_plugin
+                    # The plugin registers the meter during pair()
+                    await get_plugin("nipro").pair(mac_u, profile_id)
             except Exception as exc:  # noqa: BLE001
                 log.warning("nipro registry register skip: %s", exc)
         try:
@@ -764,7 +769,7 @@ async def job_sync(
                     or brand_id.startswith("nipro")
                     or brand_id in ("masimo", "thermo")
                 ):
-                    from medical_ble_toolkit.nipro import post_measure as pm
+                    from medical_ble_toolkit.brands.nipro import post_measure as pm
 
                     if brand_id != "masimo":
                         duration = max(duration, pm.receive_s_for(profile_id))
@@ -797,7 +802,7 @@ async def job_sync(
                     find_timeout=find_to,
                     name_hint=name_hint,
                 )
-                from medical_ble_toolkit.nipro import post_measure as pm2
+                from medical_ble_toolkit.brands.nipro import post_measure as pm2
 
                 # MightySat: no quiet-end (stream until radio drops / duration)
                 # Hub passes stream_good_hold_s / stream_invalid_exit_s for duty-cycle.
@@ -817,7 +822,7 @@ async def job_sync(
                 # Ensure Nipro registry has exact name for hands-free
                 if brand.get("is_nipro") or brand_id.startswith("nipro"):
                     try:
-                        from medical_ble_toolkit.nipro.registry import register_meter
+                        from medical_ble_toolkit.brands.nipro.registry import register_meter
 
                         register_meter(
                             device_id=mac_u,
@@ -1688,7 +1693,7 @@ def handsfree_status() -> Dict[str, Any]:
 
 
 async def job_nipro_list() -> Dict[str, Any]:
-    from medical_ble_toolkit.nipro.registry import list_meters
+    from medical_ble_toolkit.brands.nipro.registry import list_meters
 
     meters = list_meters()
     return {
@@ -1716,7 +1721,7 @@ async def job_nipro_register(
     serial: str = "",
 ) -> Dict[str, Any]:
     """Register device into Nipro hands-free registry without full BLE pair."""
-    from medical_ble_toolkit.nipro.registry import register_meter
+    from medical_ble_toolkit.brands.nipro.registry import register_meter
 
     brand = get_brand(brand_id) if brand_id else None
     profile_id = (
@@ -1771,8 +1776,8 @@ async def job_nipro_handsfree_start(
     if _cycle_task and not _cycle_task.done():
         raise RuntimeError("Cycle is running — stop Cycle first")
 
-    from medical_ble_toolkit.nipro.handsfree import handsfree_wait
-    from medical_ble_toolkit.nipro.registry import list_meters
+    from medical_ble_toolkit.brands.nipro.handsfree import handsfree_wait
+    from medical_ble_toolkit.brands.nipro.registry import list_meters
 
     if not list_meters():
         raise ValueError(

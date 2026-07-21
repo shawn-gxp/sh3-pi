@@ -18,9 +18,9 @@ from typing import Any, Callable, List, Optional, Set
 
 from bleak.exc import BleakError
 
-from ..ble_client import MedicalBleClient, _brief, scan_devices, setup_logging
-from ..common.winrt_errors import is_windows, os_pair_supported
-from ..profiles import get_profile
+from medical_ble_toolkit.ble_client import MedicalBleClient, _brief, scan_devices, setup_logging
+from medical_ble_toolkit.common.winrt_errors import is_windows, os_pair_supported
+from medical_ble_toolkit.profiles import get_profile
 from .registry import (
     check_pairing,
     find_by_name,

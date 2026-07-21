@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from medical_ble_toolkit.nipro import registry as reg
+from medical_ble_toolkit.brands.nipro import registry as reg
 
 
 class TestNiproRegistry(unittest.TestCase):

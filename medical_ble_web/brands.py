@@ -236,7 +236,7 @@ def resolve_profile_id(brand: Dict[str, Any], model: str = "") -> str:
         return "omron"
     if brand.get("is_nipro") or bid.startswith("nipro"):
         try:
-            from medical_ble_toolkit.nipro.registry import infer_profile_from_name
+            from medical_ble_toolkit.brands.nipro.registry import infer_profile_from_name
 
             name = model or brand.get("default_model") or ""
             inferred = infer_profile_from_name(name)

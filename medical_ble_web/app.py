@@ -180,7 +180,7 @@ async def admin_reset() -> Dict[str, Any]:
         log.warning("stop before reset: %s", exc)
     db.reset_db()
     try:
-        from medical_ble_toolkit.nipro.registry import registry_path, save_registry
+        from medical_ble_toolkit.brands.nipro.registry import registry_path, save_registry
 
         save_registry({"meters": []})
         reg_path = str(registry_path())
