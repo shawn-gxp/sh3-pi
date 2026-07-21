@@ -1,0 +1,469 @@
+{
+  "and_ua651": {
+    "brand": "and",
+    "company_ids": [],
+    "id": "and_ua651",
+    "model": "UA-651BLE",
+    "name_hints": [
+      "UA-651",
+      "A&D",
+      "651BLE"
+    ],
+    "notes": "Full A&D SDK path: BLP + custom 0xA6/0x01/0xE1. For Nipro \u3052\u3093\u304d\u30ce\u30fc\u30c8 meters use nipro_nbp / nipro_nmbp (companion-simple BLP+0x2A08 only).",
+    "notify_uuids": [
+      "00002a35-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "and_ua651",
+    "service_uuid": "00001810-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "233bf001-5a34-1b6d-975c-000d5690abe4"
+  },
+  "beurer_as87": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_as87",
+    "model": "AS87",
+    "name_hints": [
+      "AS87"
+    ],
+    "notes": "AS87 tracker UUIDs complete; opcodes partial.",
+    "notify_uuids": [
+      "7905ff01-b5ce-4e99-a40f-4b1e122d00d0",
+      "7905ff02-b5ce-4e99-a40f-4b1e122d00d0"
+    ],
+    "parser_key": "beurer_tracker",
+    "service_uuid": "d0a2ff00-2996-d38b-e214-86515df5a1df",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "7905ff01-b5ce-4e99-a40f-4b1e122d00d0"
+  },
+  "beurer_as98": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_as98",
+    "model": "AS98",
+    "name_hints": [
+      "AS98"
+    ],
+    "notes": "AS98 FFF0 tracker.",
+    "notify_uuids": [
+      "0000fff6-0000-1000-8000-00805f9b34fb",
+      "0000fff7-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_tracker",
+    "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "0000fff6-0000-1000-8000-00805f9b34fb"
+  },
+  "beurer_as99": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_as99",
+    "model": "AS99",
+    "name_hints": [
+      "AS99"
+    ],
+    "notes": "AS99 tracker (richest command set in app).",
+    "notify_uuids": [
+      "00008001-0000-1000-8000-00805f9b34fb",
+      "00008002-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_tracker",
+    "service_uuid": "00006006-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "00008001-0000-1000-8000-00805f9b34fb"
+  },
+  "beurer_bm54": {
+    "brand": "beurer",
+    "company_ids": [
+      1553
+    ],
+    "id": "beurer_bm54",
+    "model": "BM54",
+    "name_hints": [
+      "BM54",
+      "Beurer"
+    ],
+    "notes": "Alias of beurer_bp for BM54 lab default.",
+    "notify_uuids": [
+      "00002a35-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_bp",
+    "service_uuid": "00001810-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": null
+  },
+  "beurer_bp": {
+    "brand": "beurer",
+    "company_ids": [
+      1553
+    ],
+    "id": "beurer_bp",
+    "model": "BM* / BC* SIG BLP",
+    "name_hints": [
+      "BM",
+      "BC",
+      "SERIES",
+      "ELITE",
+      "DELUXE",
+      "PREMIUM",
+      "SENSE",
+      "QUICK",
+      "AUTO400",
+      "Beurer"
+    ],
+    "notes": "Shared SIG BLP for ~66 BP models. Companion: settle \u2192 pair \u2192 DIS \u2192 optional 0x2A2B set-time \u2192 Indicate \u2192 quiet 4s. Use beurer session.",
+    "notify_uuids": [
+      "00002a35-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_bp",
+    "service_uuid": "00001810-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": null
+  },
+  "beurer_ecg": {
+    "brand": "beurer",
+    "company_ids": [
+      1553
+    ],
+    "id": "beurer_ecg",
+    "model": "BM93/95/96 ME*",
+    "name_hints": [
+      "BM93",
+      "BM95",
+      "BM96",
+      "ME90",
+      "ME95"
+    ],
+    "notes": "ECG combo: set-time + BP 2A35 full parse; ECG 6E80 waveforms partial.",
+    "notify_uuids": [
+      "00002a35-0000-1000-8000-00805f9b34fb",
+      "6e800003-b5a3-f393-e0a9-e50e24dcca9e",
+      "6e800004-b5a3-f393-e0a9-e50e24dcca9e",
+      "00002a37-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_ecg",
+    "service_uuid": "00001810-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "6e800002-b5a3-f393-e0a9-e50e24dcca9e"
+  },
+  "beurer_glucose": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_glucose",
+    "model": "GL*",
+    "name_hints": [
+      "GL50",
+      "GL60",
+      "GL44",
+      "GL48",
+      "GL49",
+      "GL40",
+      "GL34",
+      "GL22",
+      "Beurer"
+    ],
+    "notes": "Glucose 0x1808 + RACP report-all after CCCD (Gl50SyncRepo timing).",
+    "notify_uuids": [
+      "00002a18-0000-1000-8000-00805f9b34fb",
+      "00002a34-0000-1000-8000-00805f9b34fb",
+      "00002a52-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_glucose",
+    "service_uuid": "00001808-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "00002a52-0000-1000-8000-00805f9b34fb"
+  },
+  "beurer_hydration": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_hydration",
+    "model": "DM20",
+    "name_hints": [
+      "DM20"
+    ],
+    "notes": "DM20 hydration \u2014 protocol partial; RE subscribe-all.",
+    "notify_uuids": [],
+    "parser_key": "beurer_tracker",
+    "service_uuid": null,
+    "subscribe_all_notifiable": true,
+    "write_uuid": null
+  },
+  "beurer_po60": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_po60",
+    "model": "PO60",
+    "name_hints": [
+      "PO60",
+      "Beurer"
+    ],
+    "notes": "PO60 proprietary; notify FF02, request-more 99 01 1A on FF01.",
+    "notify_uuids": [
+      "0000ff02-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_po60",
+    "service_uuid": "0000ff12-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "0000ff01-0000-1000-8000-00805f9b34fb"
+  },
+  "beurer_scale": {
+    "brand": "beurer",
+    "company_ids": [
+      1553
+    ],
+    "id": "beurer_scale",
+    "model": "BF*",
+    "name_hints": [
+      "BF",
+      "Beurer"
+    ],
+    "notes": "Scale mixed SIG+FFF0; BF700 GET_MEASUREMENT 0x41 state machine.",
+    "notify_uuids": [
+      "00002a9d-0000-1000-8000-00805f9b34fb",
+      "00002a9c-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_scale",
+    "service_uuid": "0000181d-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": true,
+    "write_uuid": "0000fff1-0000-1000-8000-00805f9b34fb"
+  },
+  "beurer_thermo": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_thermo",
+    "model": "FT*",
+    "name_hints": [
+      "FT",
+      "Beurer"
+    ],
+    "notes": "FT* 13-byte Temperature Measurement indicate (app length==13).",
+    "notify_uuids": [
+      "00002a1c-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "beurer_thermo",
+    "service_uuid": "00001809-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": null
+  },
+  "beurer_tracker_legacy": {
+    "brand": "beurer",
+    "company_ids": [],
+    "id": "beurer_tracker_legacy",
+    "model": "AS80/81/97",
+    "name_hints": [
+      "AS80",
+      "AS81",
+      "AS97",
+      "PR102"
+    ],
+    "notes": "Legacy trackers \u2014 limited config; subscribe-all RE mode.",
+    "notify_uuids": [],
+    "parser_key": "beurer_tracker",
+    "service_uuid": null,
+    "subscribe_all_notifiable": true,
+    "write_uuid": null
+  },
+  "fora6": {
+    "brand": "fora",
+    "company_ids": [],
+    "id": "fora6",
+    "model": "FORA 6 Connect",
+    "name_hints": [
+      "FORA",
+      "FORA6",
+      "iFORA"
+    ],
+    "notes": "NO protocol datasheet \u2014 RE mode. Subscribe to all Notify/Indicate chars and map hex dumps after strip tests.",
+    "notify_uuids": [],
+    "parser_key": "fora",
+    "service_uuid": null,
+    "subscribe_all_notifiable": true,
+    "write_uuid": null
+  },
+  "hem7143t1": {
+    "brand": "omron",
+    "company_ids": [
+      526
+    ],
+    "id": "hem7143t1",
+    "model": "HEM-7143T1",
+    "name_hints": [
+      "HEM-7143",
+      "BLESmart",
+      "Omron"
+    ],
+    "notes": "Lab cuff. Pair with flashing P; read with short-press BT transfer mode.",
+    "notify_uuids": [
+      "49123040-aee8-11e1-a74d-0002a5d5c51b"
+    ],
+    "parser_key": "hem-7143t1",
+    "service_uuid": "0000fe4a-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "db5b55e0-aee7-11e1-965e-0002a5d5c51b"
+  },
+  "mightysat": {
+    "brand": "masimo",
+    "company_ids": [
+      579
+    ],
+    "id": "mightysat",
+    "model": "MightySat",
+    "name_hints": [
+      "MightySat",
+      "Masimo"
+    ],
+    "notes": "Companion order: notify \u2192 GetInfo \u2192 SetClock(.NET ticks) \u2192 EnableStream from device-info bytes. SOM=0x77 framed protocol.",
+    "notify_uuids": [
+      "54c21002-a720-4b4f-11e4-9fe20002a5d5"
+    ],
+    "parser_key": "mightysat",
+    "service_uuid": "54c21000-a720-4b4f-11e4-9fe20002a5d5",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "54c21001-a720-4b4f-11e4-9fe20002a5d5"
+  },
+  "nipro_cf": {
+    "brand": "nipro",
+    "company_ids": [],
+    "id": "nipro_cf",
+    "model": "NIPRO CF",
+    "name_hints": [
+      "NIPRO CF",
+      "NIPROCF",
+      "Cocoron"
+    ],
+    "notes": "Companion BLEDeviceCFL (Cocoron): proprietary glucose UUIDs, clock on 87F60002, RACP 04 01 / 01 01 (All) or Diff by last seq.",
+    "notify_uuids": [
+      "5d87a4a1-e42d-11e5-beef-0002a5d5c51b",
+      "5d87a4a2-e42d-11e5-beef-0002a5d5c51b",
+      "5d87a4a3-e42d-11e5-beef-0002a5d5c51b"
+    ],
+    "parser_key": "nipro_cf",
+    "service_uuid": "5d87a4a0-e42d-11e5-beef-0002a5d5c51b",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "5d87a4a3-e42d-11e5-beef-0002a5d5c51b"
+  },
+  "nipro_nbp": {
+    "brand": "nipro",
+    "company_ids": [],
+    "id": "nipro_nbp",
+    "model": "NBP-1BLE",
+    "name_hints": [
+      "NBP-1BLE",
+      "NBP-1"
+    ],
+    "notes": "Companion BLEDeviceNBP1: sleep 1s \u2192 write DateTime 0x2A08 \u2192 indicate 0x2A35. No A&D custom 0xE1.",
+    "notify_uuids": [
+      "00002a35-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "nipro_nbp",
+    "service_uuid": "00001810-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "00002a08-0000-1000-8000-00805f9b34fb"
+  },
+  "nipro_nmbp": {
+    "brand": "nipro",
+    "company_ids": [],
+    "id": "nipro_nmbp",
+    "model": "NMBP",
+    "name_hints": [
+      "NMBP"
+    ],
+    "notes": "Companion BLEDeviceUM212 (NMBP): bond recommended + same BLP clock path as NBP-1BLE. Prefer --pair on Windows.",
+    "notify_uuids": [
+      "00002a35-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "nipro_nmbp",
+    "service_uuid": "00001810-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "00002a08-0000-1000-8000-00805f9b34fb"
+  },
+  "nipro_nsm1": {
+    "brand": "nipro",
+    "company_ids": [],
+    "id": "nipro_nsm1",
+    "model": "NSM-1BLE",
+    "name_hints": [
+      "NSM-1BLE",
+      "NSM-1"
+    ],
+    "notes": "Companion BLEDeviceNSM1: sleep 1s \u2192 write HTS DateTime 0x2A08 \u2192 indicate Temperature 0x2A1C. Pair may write custom 02 01 03 disconnect.",
+    "notify_uuids": [
+      "00002a1c-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "nipro_nsm1",
+    "service_uuid": "00001809-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "00002a08-0000-1000-8000-00805f9b34fb"
+  },
+  "nipro_nt100b": {
+    "brand": "nipro",
+    "company_ids": [],
+    "id": "nipro_nt100b",
+    "model": "NT-100B",
+    "name_hints": [
+      "NT-100B",
+      "NT-100"
+    ],
+    "notes": "Post-measure sync: subscribe HTP 0x2A1C + pull latest TICD storage (0x25/0x26 idx 0) because indication often fires before connect. Teardown: TICD power-off 0x50.",
+    "notify_uuids": [
+      "00002a1c-0000-1000-8000-00805f9b34fb",
+      "00001524-1212-efde-1523-785feabcd123"
+    ],
+    "parser_key": "nipro_nt100b",
+    "service_uuid": "00001809-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "00001524-1212-efde-1523-785feabcd123"
+  },
+  "omron": {
+    "brand": "omron",
+    "company_ids": [
+      526
+    ],
+    "id": "omron",
+    "model": "HEM-* (catalog)",
+    "name_hints": [
+      "Omron",
+      "BLESmart",
+      "HEM-"
+    ],
+    "notes": "NOT SIG BLP history. Use: python -m medical_ble_toolkit omron pair|read -d HEM-7143T1 -a <MAC>. Backed by medical_ble_toolkit.omron_bp (23 models).",
+    "notify_uuids": [
+      "49123040-aee8-11e1-a74d-0002a5d5c51b"
+    ],
+    "parser_key": "omron",
+    "service_uuid": "0000fe4a-0000-1000-8000-00805f9b34fb",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "db5b55e0-aee7-11e1-965e-0002a5d5c51b"
+  },
+  "re_generic": {
+    "brand": "unknown",
+    "company_ids": [],
+    "id": "re_generic",
+    "model": "generic",
+    "name_hints": [],
+    "notes": "Blind reverse-engineering: GATT tree + subscribe-all + hex dumps.",
+    "notify_uuids": [],
+    "parser_key": "blp",
+    "service_uuid": null,
+    "subscribe_all_notifiable": true,
+    "write_uuid": null
+  },
+  "thermometer": {
+    "brand": "thermo",
+    "company_ids": [],
+    "id": "thermometer",
+    "model": "NT-100B TICD history",
+    "name_hints": [
+      "TICD"
+    ],
+    "notes": "Lab/TICD history poll (0x2B/0x25/0x26). For companion-like NT-100B sync use profile nipro_nt100b (HTP + power-off).",
+    "notify_uuids": [
+      "00001524-1212-efde-1523-785feabcd123",
+      "00002a1c-0000-1000-8000-00805f9b34fb"
+    ],
+    "parser_key": "thermometer",
+    "service_uuid": "00001523-1212-efde-1523-785feabcd123",
+    "subscribe_all_notifiable": false,
+    "write_uuid": "00001524-1212-efde-1523-785feabcd123"
+  }
+}

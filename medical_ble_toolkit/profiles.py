@@ -382,6 +382,10 @@ PROFILES: dict[str, DeviceProfile] = {
 }
 
 
+
+from .brands.omron.profiles import OMRON_PROFILES
+PROFILES.update(OMRON_PROFILES)
+
 def list_profiles() -> List[DeviceProfile]:
     return list(PROFILES.values())
 
