@@ -12,7 +12,10 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
+
+if TYPE_CHECKING:
+    from medical_ble_toolkit.profiles import DeviceProfile
 
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
@@ -35,7 +38,7 @@ from medical_ble_toolkit.parsers import glucose as glucose_mod
 from medical_ble_toolkit.parsers import beurer_po60 as po60_mod
 from medical_ble_toolkit.parsers import beurer_scale as scale_mod
 from medical_ble_toolkit.models import DeviceBrand
-from medical_ble_toolkit.profiles import DeviceProfile, get_profile
+# get_profile imported lazily to avoid circular imports
 from .capabilities import DeviceCapabilities, get_capabilities, mfg_data_suggests_passkey
 from .catalog import BeurerDevice, get_device
 from .dedup import bp_dedup_key, dedupe_readings, glucose_dedup_key
@@ -113,10 +116,9 @@ class BeurerCompanionSession:
         self.model_id = (
             self.device_meta.id if self.device_meta else (model_id or "BM54").upper()
         )
-        self.toolkit_profile = (
-            self.device_meta.toolkit_profile if self.device_meta else "beurer_bp"
-        )
-        self.profile: DeviceProfile = get_profile(self.toolkit_profile)
+        self.toolkit_profile = getattr(self.device_meta, "toolkit_profile", "beurer_bp")
+        from medical_ble_toolkit.profiles import get_profile
+        self.profile: 'DeviceProfile' = get_profile(self.toolkit_profile)
         self.caps: DeviceCapabilities = get_capabilities(self.model_id)
         self.timing: SessionTiming = timing_for_profile(
             self.toolkit_profile, self.model_id
