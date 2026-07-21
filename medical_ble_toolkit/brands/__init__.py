@@ -6,9 +6,9 @@ Brand plugins must not import omron_bridge / heavy facades at module top-level;
 that creates cycles with parsers → brands package init. Lazy-import inside
 plugin methods instead.
 """
-from .omron import plugin as _omron_plugin  # noqa: F401
+from .omron import plugin as _omron_plugin   # noqa: F401 — Phase 1
+from .beurer import plugin as _beurer_plugin # noqa: F401 — Phase 2A
 
 # Future:
 # from .nipro import plugin as _nipro_plugin
-# from .beurer import plugin as _beurer_plugin
 # from .fora import plugin as _fora_plugin

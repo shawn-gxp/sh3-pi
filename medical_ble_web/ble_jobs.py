@@ -494,12 +494,8 @@ async def _generic_pair(
             log.warning("unpair skip: %s", exc)
 
     if brand_id == "beurer":
-        from medical_ble_toolkit.brands.beurer.session import BeurerCompanionSession
-
-        sess = BeurerCompanionSession(mac, model_id=model or "BM54", pair=True)
-        result = await sess.run()
-        if not result.ok:
-            raise RuntimeError(result.message or result.status.value)
+        from medical_ble_toolkit.core.registry import get_plugin
+        await get_plugin("beurer").pair(mac, model, force_rebind=force_rebind)
         return
 
     profile = get_profile(profile_id)
@@ -641,13 +637,9 @@ async def job_sync(
                     stored += 1
                     collected.append(row)
             elif brand_id == "beurer":
-                from medical_ble_toolkit.brands.beurer.session import BeurerCompanionSession
-
-                sess = BeurerCompanionSession(
-                    mac_u, model_id=model or "BM54", pair=True
-                )
-                result = await sess.run()
-                for r in result.readings:
+                from medical_ble_toolkit.core.registry import get_plugin
+                sync_result = await get_plugin("beurer").run_session(mac_u, model)
+                for r in sync_result.readings:
                     row = _reading_to_row(r, brand_id)
                     if row["reading_type"] == "waveform":
                         continue
@@ -673,8 +665,8 @@ async def job_sync(
                             collected.append(row)
                             if rid is not None:
                                 stored += 1
-                if not result.ok and stored == 0:
-                    raise RuntimeError(result.message or str(result.status))
+                if not sync_result.ok and stored == 0:
+                    raise RuntimeError(sync_result.detail.get("message") or "Beurer session failed")
             else:
                 from medical_ble_toolkit.ble_client import MedicalBleClient
                 from medical_ble_toolkit.common.winrt_errors import os_pair_supported
