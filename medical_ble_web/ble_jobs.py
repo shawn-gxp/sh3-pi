@@ -1801,7 +1801,8 @@ async def _hub_run_session(target: Any) -> Dict[str, Any]:
     (BlueZ multi-connect). Scan/Pair still pause the hub and take _ble_lock.
     """
     from medical_ble_toolkit.hub.config import load_hub_config
-    from medical_ble_toolkit.hub.policy import is_stream
+    from medical_ble_toolkit.core.registry import has_plugin, get_plugin
+    from medical_ble_toolkit.core.device_plugin import DeviceClass
 
     cfg = load_hub_config()
     brand_id = (target.brand or "").lower()
@@ -1819,7 +1820,8 @@ async def _hub_run_session(target: Any) -> Dict[str, Any]:
     _push_dashboard(highlight_mac=mac)
 
     try:
-        if is_stream(brand_id) or brand_id == "masimo":
+        _is_stream = has_plugin(brand_id) and get_plugin(brand_id).device_class == DeviceClass.STREAM
+        if _is_stream:
             # Duty-cycle: valid SpO2 up to good_hold_s, or "-" for invalid_exit_s → drop
             good_hold = float(
                 getattr(cfg, "mightysat_good_hold_s", 20.0) or 20.0
