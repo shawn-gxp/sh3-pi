@@ -161,6 +161,19 @@
       font-size: 1.2rem;
       font-weight: bold;
     }
+    .vital-value.spo2 { color: #5ec8ff; }
+    .vital-value.pr { color: var(--ok); }
+    .vital-value.pi { color: #82aaff; }
+    .vital-value.pvi { color: #ffcb6b; }
+    .vital-value.rrp { color: #c792ea; }
+    .vital-value.bp { color: var(--err); }
+    .vital-value.temp { color: #c792ea; }
+    .vital-value.glucose { color: #ffcb6b; }
+    .vital-unit {
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
     .vital-time {
       grid-column: 1 / -1;
       font-size: 0.75rem;
@@ -368,6 +381,17 @@
       document.getElementById('daemonLastDevice').innerText = daemon.last_mac || '-';
     }
 
+    function fmtNum(v, digits) {
+      if (v === null || v === undefined || v === '') return '—';
+      const n = Number(v);
+      if (!Number.isFinite(n)) return String(v);
+      return digits != null ? n.toFixed(digits) : String(n);
+    }
+
+    function hasVal(v) {
+      return v !== null && v !== undefined && v !== '';
+    }
+
     function renderDashboard(board, highlightMac = '') {
       const grid = document.getElementById('dashboardGrid');
       if (!board || board.length === 0) {
@@ -376,39 +400,55 @@
       }
       
       grid.innerHTML = board.map(device => {
-        const mac = device.mac.toUpperCase();
-        const isHighlight = mac === highlightMac.toUpperCase() ? 'highlight' : '';
+        const mac = (device.mac || '').toUpperCase();
+        const isHighlight = mac && mac === (highlightMac || '').toUpperCase() ? 'highlight' : '';
         const isOnline = device.online ? 'online' : '';
         const statusText = device.online ? 'Online' : 'Offline';
+        const title = device.name || device.model || device.brand || 'Device';
         
         let vitalsHtml = '<div class="vital-empty">No readings yet</div>';
         if (device.vitals) {
           const v = device.vitals;
-          vitalsHtml = '';
-          if (v.systolic && v.diastolic) {
-            vitalsHtml += `<div class="vital-item"><span class="vital-label">BP</span><span class="vital-value" style="color:var(--err)">${v.systolic}/${v.diastolic}</span></div>`;
+          const parts = [];
+          // BP: sys/dia (+ pulse on same card below)
+          if (hasVal(v.systolic) && hasVal(v.diastolic)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">BP</span><span class="vital-value bp">${fmtNum(v.systolic)}/${fmtNum(v.diastolic)}</span><span class="vital-unit">mmHg</span></div>`);
           }
-          if (v.pulse_rate) {
-            vitalsHtml += `<div class="vital-item"><span class="vital-label">Pulse</span><span class="vital-value" style="color:var(--ok)">${v.pulse_rate} bpm</span></div>`;
+          // Masimo / SpO2 full set (old UI: SpO2 + PR + PI; plus PVI + RRp when present)
+          if (hasVal(v.spo2)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">SpO2</span><span class="vital-value spo2">${fmtNum(v.spo2)}</span><span class="vital-unit">%</span></div>`);
           }
-          if (v.spo2) {
-            vitalsHtml += `<div class="vital-item"><span class="vital-label">SpO2</span><span class="vital-value" style="color:#5ec8ff">${v.spo2}%</span></div>`;
+          if (hasVal(v.pulse_rate)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">Pulse</span><span class="vital-value pr">${fmtNum(v.pulse_rate)}</span><span class="vital-unit">bpm</span></div>`);
           }
-          if (v.temperature) {
-            vitalsHtml += `<div class="vital-item"><span class="vital-label">Temp</span><span class="vital-value" style="color:#c792ea">${v.temperature}°C</span></div>`;
+          if (hasVal(v.perfusion_index)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">PI</span><span class="vital-value pi">${fmtNum(v.perfusion_index, 2)}</span><span class="vital-unit">perfusion</span></div>`);
           }
-          const timeStr = v.measured_at ? new Date(v.measured_at).toLocaleTimeString() : '';
+          if (hasVal(v.pvi)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">PVI</span><span class="vital-value pvi">${fmtNum(v.pvi)}</span><span class="vital-unit">%</span></div>`);
+          }
+          if (hasVal(v.rrp)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">RRp</span><span class="vital-value rrp">${fmtNum(v.rrp)}</span><span class="vital-unit">/min</span></div>`);
+          }
+          if (hasVal(v.temperature)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">Temp</span><span class="vital-value temp">${fmtNum(v.temperature, 1)}</span><span class="vital-unit">°C</span></div>`);
+          }
+          if (hasVal(v.glucose_mg_dl)) {
+            parts.push(`<div class="vital-item"><span class="vital-label">Glucose</span><span class="vital-value glucose">${fmtNum(v.glucose_mg_dl)}</span><span class="vital-unit">mg/dL</span></div>`);
+          }
+          const timeStr = v.measured_at ? new Date(v.measured_at).toLocaleString() : '';
           if (timeStr) {
-            vitalsHtml += `<div class="vital-time">Last updated: ${timeStr}</div>`;
+            parts.push(`<div class="vital-time">Last updated: ${timeStr}</div>`);
           }
+          if (parts.length) vitalsHtml = parts.join('');
         }
 
         return `
           <div class="device-card ${isHighlight}">
             <div class="device-header">
               <div>
-                <h3 class="device-name">${device.brand}</h3>
-                <div class="device-mac">${mac}</div>
+                <h3 class="device-name">${title}</h3>
+                <div class="device-mac">${device.brand || ''} · ${mac}</div>
               </div>
               <span class="device-status ${isOnline}">${statusText}</span>
             </div>

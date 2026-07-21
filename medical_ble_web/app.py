@@ -62,12 +62,6 @@ if STATIC.is_dir():
 
 @app.on_event("startup")
 async def _startup() -> None:
-    try:
-        import subprocess
-        subprocess.run(["systemd-notify", "--ready"], check=False)
-    except Exception:
-        pass
-
     db.init_db()
     log.info("SQLite ready: %s", db.DB_PATH)
     log.info("Open http://0.0.0.0:8741")

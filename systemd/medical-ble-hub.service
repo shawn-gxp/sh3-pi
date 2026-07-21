@@ -49,7 +49,8 @@ ReadWritePaths=/home/sh3/Desktop/sh3-hw-layer-experiments/medical_ble_web/data
 # Resource Limits
 MemoryMax=400M
 TasksMax=128
-WatchdogSec=120
+# Note: do not set WatchdogSec unless the process sends sd_notify WATCHDOG=1.
+# HTTP liveness is covered by medical-ble-hub-watchdog.timer (/health every ~60s).
 
 # Logging → journalctl -u medical-ble-hub
 StandardOutput=journal

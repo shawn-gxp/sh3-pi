@@ -1316,19 +1316,43 @@ def build_dashboard(
         card["slot_status"] = "reading" if card["active"] else "idle"
         card["online"] = card["active"]
         
-        # Attach compact vitals for UI
+        # Attach compact vitals for UI (Masimo: SpO2 + PR + PI + PVI + RRp)
         latest = card.get("latest") or {}
-        card["vitals"] = {
-            "reading_type": latest.get("reading_type"),
-            "measured_at": latest.get("measured_at") or latest.get("created_at"),
-            "systolic": latest.get("systolic"),
-            "diastolic": latest.get("diastolic"),
-            "pulse_rate": latest.get("pulse_rate"),
-            "spo2": latest.get("spo2"),
-            "perfusion_index": latest.get("perfusion_index"),
-            "temperature": latest.get("temperature"),
-            "glucose_mg_dl": latest.get("glucose_mg_dl"),
-        } if latest else None
+        if latest:
+            payload: Dict[str, Any] = {}
+            raw_payload = latest.get("payload_json")
+            if isinstance(raw_payload, str) and raw_payload.strip():
+                try:
+                    import json as _json
+
+                    parsed = _json.loads(raw_payload)
+                    if isinstance(parsed, dict):
+                        payload = parsed
+                except Exception:  # noqa: BLE001
+                    payload = {}
+            elif isinstance(raw_payload, dict):
+                payload = raw_payload
+            card["vitals"] = {
+                "reading_type": latest.get("reading_type"),
+                "measured_at": latest.get("measured_at") or latest.get("created_at"),
+                "systolic": latest.get("systolic"),
+                "diastolic": latest.get("diastolic"),
+                "pulse_rate": latest.get("pulse_rate")
+                if latest.get("pulse_rate") is not None
+                else _f(payload.get("pulse_rate")),
+                "spo2": latest.get("spo2")
+                if latest.get("spo2") is not None
+                else _f(payload.get("spo2")),
+                "perfusion_index": latest.get("perfusion_index")
+                if latest.get("perfusion_index") is not None
+                else _f(payload.get("perfusion_index")),
+                "pvi": _f(payload.get("pvi")),
+                "rrp": _f(payload.get("rrp")),
+                "temperature": latest.get("temperature"),
+                "glucose_mg_dl": latest.get("glucose_mg_dl"),
+            }
+        else:
+            card["vitals"] = None
     return {
         "ok": True,
         "board": board,
