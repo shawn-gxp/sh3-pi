@@ -63,3 +63,12 @@ class DevicePlugin(ABC):
     def matches_advertisement(self, name: str = "", mfg_ids: Optional[list[int]] = None) -> bool:
         """Optional: opportunistic advertisement match for hub discovery. Default: False (MAC-strict only)."""
         return False
+
+    def listen_s(self, slot_s: float) -> float:
+        """How many seconds to listen during a hub cycle slot. Override per brand."""
+        return min(float(slot_s), 60.0)
+
+    def quiet_timeout_s(self, profile_id: str) -> float:
+        """Quiet-end timeout after last indication. 0.0 = stream/no quiet end."""
+        return 0.0
+
