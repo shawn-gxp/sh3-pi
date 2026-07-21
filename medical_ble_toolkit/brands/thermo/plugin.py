@@ -13,6 +13,7 @@ from medical_ble_toolkit.core.registry import register
 
 class ThermoPlugin(DevicePlugin):
     brand_id = "thermo"
+    aliases = ("thermometer", "nipro_nt100b", "nipro_nsm1")
     device_class = DeviceClass.WINDOWED
     priority_rank = 70
 

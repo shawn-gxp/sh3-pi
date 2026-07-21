@@ -43,6 +43,7 @@ class DevicePlugin(ABC):
     """One instance per brand. See brands/omron/plugin.py for the reference implementation."""
 
     brand_id: str
+    aliases: tuple[str, ...] = ()
     device_class: DeviceClass
     priority_rank: int = 50
 

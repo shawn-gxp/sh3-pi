@@ -19,6 +19,8 @@ def register(plugin: DevicePlugin) -> None:
     if plugin.brand_id in _PLUGINS:
         raise ValueError(f"Plugin already registered for brand_id={plugin.brand_id!r}")
     _PLUGINS[plugin.brand_id] = plugin
+    for alias in plugin.aliases:
+        _PLUGINS[alias] = plugin
 
 
 def get_plugin(brand_id: str) -> DevicePlugin:

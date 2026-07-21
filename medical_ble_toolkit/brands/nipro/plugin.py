@@ -21,6 +21,7 @@ from medical_ble_toolkit.core.registry import register
 
 class NiproPlugin(DevicePlugin):
     brand_id = "nipro"
+    aliases = ("nipro_nbp", "nipro_nmbp", "nipro_cf", "nipro_companion")
     device_class = DeviceClass.WINDOWED
     priority_rank = 30
 
