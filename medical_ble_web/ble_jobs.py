@@ -572,72 +572,24 @@ async def job_sync(
     try:
         async with _maybe_ble_lock(exclusive_radio):
             if brand.get("is_omron"):
-                from medical_ble_toolkit.omron_bridge import (
-                    flatten_readings,
-                    read_omron,
-                )
-
-                # Direct MAC connect (Win11 parity). Omron BLE often stays up for
-                # hours after last use — no button / no active measurement required.
-                last_omron_exc: Optional[BaseException] = None
-                all_users = None
-                for attempt in (1, 2):
-                    try:
-                        if attempt == 2:
-                            log.warning(
-                                "Omron READ retry 2/2 — direct reconnect "
-                                "(cuff may still be in long post-session window)…"
-                            )
-                            await asyncio.sleep(1.5)
-                        all_users = await read_omron(
-                            mac_u,
-                            model,
-                            find_timeout=15.0,  # direct path; scan not required
-                            session_retries=2,
-                        )
-                        last_omron_exc = None
-                        break
-                    except Exception as exc:  # noqa: BLE001
-                        last_omron_exc = exc
-                        msg = str(exc).lower()
-                        if "fe4a" in msg or "parent service" in msg:
-                            if attempt == 1:
-                                log.warning(
-                                    "FE4A missing on attempt 1 — will retry once "
-                                    "(use short-press transfer, not flashing P)"
-                                )
-                                continue
-                            raise _omron_fe4a_error(exc) from exc
-                        raise
-                if last_omron_exc is not None:
-                    raise last_omron_exc
-                assert all_users is not None
-                flat = flatten_readings(all_users)
-                skipped_dup = 0
-                for r in flat:
+                from medical_ble_toolkit.core.registry import get_plugin
+                sync_result = await get_plugin("omron").run_session(mac_u, model)
+                for r in sync_result.readings:
                     row = _reading_to_row(r, brand_id)
                     if not _is_clinical(row):
                         continue
                     rid = db.insert_reading(
-                        device_id=device_id,
-                        session_id=sid,
-                        brand=brand_id,
-                        reading_type=row["reading_type"],
-                        measured_at=row.get("measured_at"),
-                        systolic=row.get("systolic"),
-                        diastolic=row.get("diastolic"),
-                        pulse_rate=row.get("pulse_rate"),
-                        spo2=row.get("spo2"),
+                        device_id=device_id, session_id=sid, brand=brand_id,
+                        reading_type=row["reading_type"], measured_at=row.get("measured_at"),
+                        systolic=row.get("systolic"), diastolic=row.get("diastolic"),
+                        pulse_rate=row.get("pulse_rate"), spo2=row.get("spo2"),
                         perfusion_index=row.get("perfusion_index"),
-                        temperature=row.get("temperature"),
-                        glucose_mg_dl=row.get("glucose_mg_dl"),
-                        payload=row.get("payload"),
-                        raw_hex=row.get("raw_hex") or "",
+                        temperature=row.get("temperature"), glucose_mg_dl=row.get("glucose_mg_dl"),
+                        payload=row.get("payload"), raw_hex=row.get("raw_hex") or "",
                         dedupe=True,
                     )
                     if rid is None:
-                        skipped_dup += 1
-                        collected.append(row)  # still show on dashboard
+                        collected.append(row)
                         continue
                     stored += 1
                     collected.append(row)

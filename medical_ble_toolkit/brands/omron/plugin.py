@@ -11,7 +11,7 @@ creates a cycle:
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from medical_ble_toolkit.core.device_plugin import (
     DeviceClass,
@@ -37,10 +37,34 @@ class OmronPlugin(DevicePlugin):
         from medical_ble_toolkit.omron_bridge import flatten_readings, read_omron
 
         find_timeout = kwargs.get("find_timeout", 15.0)
-        session_retries = kwargs.get("session_retries", 2)
-        all_users = await read_omron(
-            mac, model, find_timeout=find_timeout, session_retries=session_retries
-        )
+        last_exc: Optional[BaseException] = None
+        all_users = None
+        for attempt in (1, 2):
+            try:
+                if attempt == 2:
+                    import asyncio
+                    import logging
+                    logging.getLogger("medical_ble_web.ble").warning(
+                        "Omron READ retry 2/2 — direct reconnect "
+                        "(cuff may still be in long post-session window)…"
+                    )
+                    await asyncio.sleep(1.5)
+                all_users = await read_omron(
+                    mac, model, find_timeout=find_timeout, session_retries=2
+                )
+                last_exc = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                msg = str(exc).lower()
+                if "fe4a" in msg or "parent service" in msg:
+                    if attempt == 1:
+                        continue  # retry once
+                    raise  # let orchestrator's outer except re-wrap it
+                raise
+        if last_exc is not None:
+            raise last_exc
+        assert all_users is not None
         readings = flatten_readings(all_users)
         return SessionResult(ok=True, readings=readings)
 
