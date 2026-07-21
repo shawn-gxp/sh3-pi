@@ -83,19 +83,6 @@ PROFILES: dict[str, DeviceProfile] = {
             "use profile nipro_nt100b (HTP + power-off)."
         ),
     ),
-    "fora6": DeviceProfile(
-        id="fora6",
-        brand="fora",
-        model="FORA 6 Connect",
-        parser_key="fora",
-        name_hints=("FORA", "FORA6", "iFORA"),
-        notify_uuids=(),
-        subscribe_all_notifiable=True,
-        notes=(
-            "NO protocol datasheet — RE mode. Subscribe to all Notify/Indicate "
-            "chars and map hex dumps after strip tests."
-        ),
-    ),
     # Omron — proprietary EEPROM (use CLI: omron pair / omron read)
     "omron": DeviceProfile(
         id="omron",
@@ -144,6 +131,8 @@ from .brands.beurer.profiles import BEURER_PROFILES
 PROFILES.update(BEURER_PROFILES)
 from .brands.nipro.profiles import NIPRO_PROFILES
 PROFILES.update(NIPRO_PROFILES)
+from .brands.fora.profiles import FORA_PROFILES
+PROFILES.update(FORA_PROFILES)
 
 def list_profiles() -> List[DeviceProfile]:
     return list(PROFILES.values())
