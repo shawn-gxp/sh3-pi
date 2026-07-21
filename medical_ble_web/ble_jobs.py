@@ -1350,14 +1350,16 @@ def _cycle_now() -> str:
 def _listen_for_brand(brand_id: str, slot_s: float) -> float:
     """How long to listen during a cycle slot (capped by slot)."""
     slot = max(5.0, float(slot_s))
+    from medical_ble_toolkit.core.registry import has_plugin, get_plugin
+    if has_plugin(brand_id):
+        return get_plugin(brand_id).listen_s(slot)
+    # Fallback for brands without a plugin yet (masimo, and, thermo)
     if brand_id == "masimo":
-        return slot  # stream for full slot
+        return slot
     if brand_id == "and":
-        return min(slot, 60.0)  # A&D may need longer indicate dump
+        return min(slot, 60.0)
     if brand_id in ("thermo", "thermometer"):
         return min(slot, 20.0)
-    if brand_id == "omron":
-        return min(slot, 45.0)
     return min(slot, 30.0)
 
 
