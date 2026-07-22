@@ -299,8 +299,8 @@
             <select id="pairBrand">
               <option value="omron">Omron (BP)</option>
               <option value="nipro_nbp">Nipro NBP (BP)</option>
-              <option value="nipro_nt">Nipro NT (Temp)</option>
-              <option value="masimo">Masimo MightySat (SpO2)</option>
+              <option value="nipro_nt100b">Nipro NT-100B (Temp)</option>
+              <option value="mightysat">Masimo MightySat (SpO2)</option>
             </select>
           </label>
           <label><br><button onclick="executePair()">Pair Device</button></label>
@@ -573,7 +573,12 @@
           body: JSON.stringify({ mac, brand, repair: true })
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail?.error || 'Pair failed');
+        if (!res.ok) {
+          const d = data.detail;
+          const msg = (d && d.error) || (typeof d === 'string' ? d : null)
+            || data.error || 'Pair failed';
+          throw new Error(msg);
+        }
         
         logBox.innerText += `\nSuccess! Bonded and registered. Daemon will now auto-collect.`;
         updateHealth();

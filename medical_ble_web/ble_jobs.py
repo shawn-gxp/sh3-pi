@@ -783,10 +783,10 @@ async def job_live_start(
     model = model or brand.get("default_model") or ""
     mac_u = mac.strip().upper()
     device = db.upsert_device(
-        brand=brand_id,
+        profile_id=brand.get("id") or brand_id,
+        brand=brand.get("company") or brand_id,
         mac=mac_u,
         model=model,
-        company=brand.get("company", ""),
     )
     device_id = device.get("id")
     already_paired = bool(device.get("paired"))
@@ -1584,11 +1584,11 @@ async def job_nipro_register(
     # Also save web device row
     if brand:
         db.upsert_device(
-            brand=brand_id,
+            profile_id=brand.get("id") or brand_id,
+            brand=brand.get("company") or brand_id,
             mac=mac.strip().upper(),
             model=model or brand.get("default_model", ""),
             name=name.strip(),
-            company=brand.get("company", ""),
             paired=True,
         )
     return {
@@ -1780,10 +1780,56 @@ def _daemon_now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# profile_id (SQLite) → hub policy brand key (TIER1_BRANDS in hub/policy.py).
+# Hub filters/matches on these ids — NOT the UI display brand ("Nipro", "Omron").
+_PROFILE_TO_HUB_BRAND = {
+    "omron": "omron",
+    "hem7143t1": "omron",
+    "nipro_nbp": "nipro_nbp",
+    "nipro_nmbp": "nipro_nmbp",
+    "nipro_nt100b": "nipro_nt100b",
+    "thermometer": "thermo",
+    "thermo": "thermo",
+    "mightysat": "masimo",
+    "masimo": "masimo",
+}
+
+
+def _hub_policy_brand(device: Dict[str, Any]) -> str:
+    """
+    Map a SQLite device row to the brand key hub/daemon expects.
+
+    DB stores:
+      profile_id = "nipro_nbp" | "omron" | "mightysat" | …
+      brand      = display label ("Nipro", "Nipro / TaiDoc", "Omron")
+
+    Hub TIER1_BRANDS is {omron, nipro_nbp, nipro_nt100b, masimo, …}.
+    Using display brand drops every Nipro device (brand "nipro" ∉ TIER1).
+    """
+    pid = (device.get("profile_id") or "").strip().lower()
+    if pid in _PROFILE_TO_HUB_BRAND:
+        return _PROFILE_TO_HUB_BRAND[pid]
+    if pid:
+        return pid
+    # Last resort: only works when display brand happens to match (e.g. "Omron")
+    return (device.get("brand") or "").strip().lower()
+
+
 def _hub_roster() -> List[Dict[str, Any]]:
     """Paired devices from SQLite only (never unpaired scan leftovers)."""
     devices = db.list_devices()
-    return [d for d in devices if d.get("paired") and d.get("mac") and d.get("brand")]
+    out: List[Dict[str, Any]] = []
+    for d in devices:
+        if not d.get("paired") or not d.get("mac"):
+            continue
+        brand = _hub_policy_brand(d)
+        if not brand:
+            continue
+        row = dict(d)
+        row["brand"] = brand
+        row["mac"] = (d.get("mac") or "").strip().upper()
+        out.append(row)
+    return out
 
 
 async def _hub_run_session(target: Any) -> Dict[str, Any]:

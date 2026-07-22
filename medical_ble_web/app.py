@@ -255,12 +255,11 @@ async def save_device(body: DeviceBody) -> Dict[str, Any]:
     if not brand:
         raise HTTPException(400, f"Unknown brand: {body.brand}")
     row = db.upsert_device(
-        brand=body.brand,
+        profile_id=brand.get("id") or body.brand,
+        brand=brand.get("company") or body.brand,
         mac=body.mac,
         model=body.model or brand.get("default_model", ""),
         name=body.name or body.model or brand.get("default_model", ""),
-        company=brand.get("company", ""),
-        notes=body.notes,
     )
     return {"ok": True, "device": row}
 

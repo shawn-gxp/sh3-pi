@@ -171,9 +171,20 @@ ADVANCED_BRANDS: List[SupportedDevice] = [
 BRANDS: List[SupportedDevice] = list(TIER1_BRANDS) + list(ADVANCED_BRANDS)
 
 
+# UI / legacy aliases → canonical profile_id
+_PROFILE_ALIASES = {
+    "nipro_nt": "nipro_nt100b",
+    "nt100b": "nipro_nt100b",
+    "nt-100b": "nipro_nt100b",
+    "masimo": "mightysat",
+    "mighty_sat": "mightysat",
+}
+
+
 def get_brand(profile_id: str) -> Optional[Dict[str, Any]]:
     """Get the dictionary representation for a profile_id."""
     pid = (profile_id or "").strip().lower()
+    pid = _PROFILE_ALIASES.get(pid, pid)
     for b in BRANDS:
         if b.profile_id == pid:
             return b.to_dict()
