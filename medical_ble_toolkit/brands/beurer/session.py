@@ -414,20 +414,13 @@ class BeurerCompanionSession:
         log.info("[PAIR] Waiting for SMP to complete (passkey from LCD)…")
         try:
             from medical_ble_toolkit.brands.omron.ble.connection import pair_client
-            from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
-                GLOBAL_PASSKEY_BROKER,
-                bluez_pair_agent,
+            # pair() call tells BlueZ to complete the SMP exchange
+            # The agent is already registered at the start of run()
+            await pair_client(
+                self._client,
+                passkey=self.passkey,
+                use_passkey_agent=bool(self.passkey_hint),
             )
-            broker = GLOBAL_PASSKEY_BROKER if self.passkey_hint else None
-            async with bluez_pair_agent(
-                passkey=self.passkey, broker=broker
-            ):
-                # pair() call tells BlueZ to complete the SMP exchange
-                await pair_client(
-                    self._client,
-                    passkey=self.passkey,
-                    use_passkey_agent=bool(self.passkey_hint),
-                )
             log.info("[PAIR] SMP bond complete")
             # Give BlueZ time to apply new keys before GATT retry
             await asyncio.sleep(max(self.timing.post_pair_settle_s, 1.0))
@@ -748,37 +741,56 @@ class BeurerCompanionSession:
             + f"quiet={self.timing.quiet_timeout_s}s\n"
             + "=" * 60
         )
-        try:
-            await self.connect()
-            await self._settle()
-            
-            # For passkey models: register agent BEFORE GATT probe
-            await self._ensure_agent_running()
-            
-            # Read DIS before subscribe if not protected
-            await self._read_dis()
-            
-            # --- GATT probe → triggers device SMP ---
-            try:
-                await self._subscribe(raise_on_insufficient_auth=self.passkey_hint)
-            except Exception as probe_exc:
-                if _is_insufficient_auth(probe_exc) and self.pair:
-                    # Device replied 0x05 → SMP starts, passkey shown on LCD
-                    log.info("[PAIR] GATT 0x05 probe confirmed — completing bond")
-                    await self._complete_bond()
-                    await self._set_time_if_needed()
-                    await self._subscribe()
-                elif self.pair and not self._paired_attempt:
-                    # Fallback: explicit pair for non-passkey models
-                    await self._pair_if_needed()
-                    await self._set_time_if_needed()
-                    await self._subscribe()
-                else:
-                    raise
+        
+        import sys
+        from contextlib import asynccontextmanager
 
-            await self._set_time_if_needed()
-            await self._post_subscribe_commands()
-            await self.listen()
+        @asynccontextmanager
+        async def _maybe_agent():
+            if self.pair and self.passkey_hint and sys.platform == "linux":
+                from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
+                    GLOBAL_PASSKEY_BROKER,
+                    bluez_pair_agent,
+                )
+                async with bluez_pair_agent(
+                    passkey=self.passkey, broker=GLOBAL_PASSKEY_BROKER
+                ):
+                    yield
+            else:
+                yield
+                
+        try:
+            async with _maybe_agent():
+                await self.connect()
+                await self._settle()
+                
+                # For passkey models: setup adapter BEFORE GATT probe
+                await self._ensure_agent_running()
+                
+                # Read DIS before subscribe if not protected
+                await self._read_dis()
+                
+                # --- GATT probe → triggers device SMP ---
+                try:
+                    await self._subscribe(raise_on_insufficient_auth=self.passkey_hint)
+                except Exception as probe_exc:
+                    if _is_insufficient_auth(probe_exc) and self.pair:
+                        # Device replied 0x05 → SMP starts, passkey shown on LCD
+                        log.info("[PAIR] GATT 0x05 probe confirmed — completing bond")
+                        await self._complete_bond()
+                        await self._set_time_if_needed()
+                        await self._subscribe()
+                    elif self.pair and not self._paired_attempt:
+                        # Fallback: explicit pair for non-passkey models
+                        await self._pair_if_needed()
+                        await self._set_time_if_needed()
+                        await self._subscribe()
+                    else:
+                        raise
+
+                await self._set_time_if_needed()
+                await self._post_subscribe_commands()
+                await self.listen()
         except Exception as exc:  # noqa: BLE001
             self._last_error = exc
             if _is_auth_error(exc):

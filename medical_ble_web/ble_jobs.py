@@ -226,6 +226,15 @@ async def _pause_hub_for_manual(reason: str = "manual"):
             await asyncio.sleep(0.15)
         await asyncio.sleep(0.15)
     try:
+        # Unblock any stuck passkey agent from a previous failed pair
+        try:
+            from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
+                GLOBAL_PASSKEY_BROKER,
+            )
+            GLOBAL_PASSKEY_BROKER.cancel()
+        except Exception:
+            pass
+
         # Don't hang forever if another job holds the radio
         try:
             await asyncio.wait_for(_ble_lock.acquire(), timeout=max_wait_s)
@@ -525,7 +534,10 @@ async def job_pair(
                 from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
                     GLOBAL_PASSKEY_BROKER,
                 )
-
+                
+                # First cancel any pending wait from a previous run
+                GLOBAL_PASSKEY_BROKER.cancel()
+                # Then reset to prime it for the new run
                 GLOBAL_PASSKEY_BROKER.reset(preset=pk)
             except Exception as exc:  # noqa: BLE001
                 log.debug("passkey broker reset: %s", exc)
