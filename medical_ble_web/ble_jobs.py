@@ -908,7 +908,7 @@ async def job_sync(
             if brand_id == "masimo"
             else None,
         }
-        if brand_id in ("thermo", "thermometer", "nipro_nt100b") and stored == 0:
+        if profile_id in ("nipro_nt100b", "thermometer") and stored == 0:
             out["warning"] = (
                 "NT-100B stored 0 temps. Device BLE is usually OFF until you take "
                 "a forehead reading; advertising lasts ~1–2 minutes only. "

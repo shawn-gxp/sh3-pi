@@ -1372,17 +1372,22 @@ class MedicalBleClient:
 
                 # Dual-wake into communication mode (TICD §1.1)
                 wake = thermo_mod.cmd_wakeup_pair()
+                log.info("[NT100B] >>> WAKE1: %s", wake.hex())
                 await _tw(wake, "nt100b_wake1")
                 await asyncio.sleep(0.45)
+                log.info("[NT100B] >>> WAKE2: %s", wake.hex())
                 await _tw(wake, "nt100b_wake2")
                 await asyncio.sleep(0.55)
-                await _tw(thermo_mod.cmd_read_storage_count(), "nt100b_count")
+                count_cmd = thermo_mod.cmd_read_storage_count()
+                log.info("[NT100B] >>> COUNT: %s", count_cmd.hex())
+                await _tw(count_cmd, "nt100b_count")
                 await asyncio.sleep(0.45)
                 count = 1
                 for r in self.readings:
                     if isinstance(r, dict) and r.get("type") == "storage_count":
                         try:
                             count = max(1, int(r.get("count") or 1))
+                            log.info("[NT100B] storage_count=%d", count)
                         except (TypeError, ValueError):
                             count = 1
                         break
@@ -1391,16 +1396,14 @@ class MedicalBleClient:
                     if not self._client or not self._client.is_connected:
                         return
                     if hasattr(self._parser, "set_history_index"):
-                        self._parser.set_history_index(index)  # type: ignore[attr-defined]
-                    await _tw(
-                        thermo_mod.cmd_read_storage_time(index),
-                        f"nt100b_time[{index}]",
-                    )
+                        self._parser.set_history_index(index)
+                    time_cmd = thermo_mod.cmd_read_storage_time(index)
+                    log.info("[NT100B] >>> TIME[%d]: %s", index, time_cmd.hex())
+                    await _tw(time_cmd, f"nt100b_time[{index}]")
                     await asyncio.sleep(0.30)
-                    await _tw(
-                        thermo_mod.cmd_read_storage_result(index),
-                        f"nt100b_result[{index}]",
-                    )
+                    result_cmd = thermo_mod.cmd_read_storage_result(index)
+                    log.info("[NT100B] >>> RESULT[%d]: %s", index, result_cmd.hex())
+                    await _tw(result_cmd, f"nt100b_result[{index}]")
                     await asyncio.sleep(0.30)
 
                 # Index 0 = latest on device (TICD). Pull FIRST so the hub

@@ -28,7 +28,7 @@ class ThermoPlugin(DevicePlugin):
         from medical_ble_toolkit.profiles import get_profile
 
         on_reading = kwargs.get("on_reading")
-        profile_id = kwargs.get("profile_id", "thermometer")
+        profile_id = kwargs.get("profile_id", "nipro_nt100b")
         listen_s = float(kwargs.get("listen_s", 20.0))
         name_hint = str(kwargs.get("name_hint", ""))
         
@@ -55,7 +55,7 @@ class ThermoPlugin(DevicePlugin):
         )
 
         listen_end = getattr(client, "_listen_end_reason", "") or ""
-        return SessionResult(ok=True, readings=[], detail={"listen_end": listen_end})
+        return SessionResult(ok=True, readings=list(client.readings), detail={"listen_end": listen_end})
 
     def listen_s(self, slot_s: float) -> float:
         return min(float(slot_s), 20.0)
