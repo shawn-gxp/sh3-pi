@@ -314,7 +314,7 @@
         <p id="pairBrandNotes" style="font-size: 0.85rem; color: var(--muted); margin: 0.25rem 0 0;"></p>
         <div id="passkeyHint" class="hidden" style="margin-top: 1rem; padding: 1rem; background: rgba(240, 180, 41, 0.15); border: 1px solid var(--warn); border-radius: 6px; color: var(--text);">
           <div style="font-weight: bold; color: var(--warn); margin-bottom: 0.5rem; font-size: 1.1rem;">🔑 Waiting for Passkey</div>
-          The cuff is now showing a 6-digit code on its LCD. Type it into the Passkey field above and click <b>Send passkey</b> to complete bonding.
+          <span id="passkeyHintText">The cuff is now showing a 6-digit code on its LCD. Type it into the Passkey field above and click <b>Send passkey</b> to complete bonding.</span>
         </div>
         <div id="pairLog" class="log-box hidden"></div>
       </div>
@@ -391,19 +391,26 @@
       const modelIn = document.getElementById('pairModel');
       const notes = document.getElementById('pairBrandNotes');
       const pkWrap = document.getElementById('passkeyWrap');
+      const sendBtn = document.getElementById('btnSendPasskey');
       const b = brandCatalog.find(x => x.id === sel.value);
+      const onWindows = __platform && __platform.os === 'windows';
       if (b) {
         if (!modelIn.value || modelIn.dataset.fromBrand === '1') {
           modelIn.value = b.default_model || '';
           modelIn.dataset.fromBrand = '1';
         }
         notes.textContent = b.notes || '';
-        // Beurer BP/glucose often show a 6-digit passkey on the LCD
         const needsPk = !!(b.is_beurer || (b.id || '').startsWith('beurer'));
-        if (pkWrap) pkWrap.style.display = needsPk ? '' : 'none';
+        if (pkWrap) pkWrap.style.display = (needsPk && !onWindows) ? '' : 'none';
+        if (sendBtn) sendBtn.style.display = (needsPk && !onWindows) ? '' : 'none';
         if (needsPk) {
-          notes.textContent = (b.notes || '') +
-            ' · When the cuff shows a 6-digit code, type it in Passkey and Pair (or Send passkey while waiting).';
+          if (onWindows) {
+            notes.textContent = (b.notes || '') +
+              ' · On Windows, enter the 6-digit code from the cuff in the Bluetooth pairing popup (check your taskbar).';
+          } else {
+            notes.textContent = (b.notes || '') +
+              ' · When the cuff shows a 6-digit code, type it in Passkey and Pair (or Send passkey while waiting).';
+          }
         }
       } else {
         notes.textContent = '';
@@ -453,10 +460,13 @@
       return null;
     }
 
+    let __platform = null;
+
     async function updateHealth() {
       try {
         const res = await fetch('/health');
         const data = await res.json();
+        __platform = data.platform || null;
         const mqtt = data.mqtt || {};
         const b = document.getElementById('mqttBadge');
         if (mqtt.connected) {
@@ -469,6 +479,7 @@
           b.style.borderColor = 'var(--err)';
         }
         updateDaemonUI(data.daemon);
+        onPairBrandChange();
       } catch (e) {
         console.warn('Health check failed', e);
       }
@@ -719,11 +730,14 @@
       const passkey = (document.getElementById('pairPasskey').value || '').trim();
       const logBox = document.getElementById('pairLog');
       const hint = document.getElementById('passkeyHint');
+      const onWindows = __platform && __platform.os === 'windows';
       
       logBox.classList.remove('hidden');
       logBox.innerText = `Pairing ${brand}${model ? ' (' + model + ')' : ''} at ${mac}...\n` +
         (passkey ? `Using passkey ${passkey.replace(/\d(?=\d{0,2}$)/g, '•')}…\n` : '') +
-        `(Wake cuff / take a reading. If a 6-digit code appears on the LCD, type it in Passkey and click Send passkey.)`;
+        (onWindows
+          ? '(Wake cuff / take a reading. If a 6-digit code appears on the cuff LCD, enter it in the Windows Bluetooth popup — check your taskbar.)'
+          : '(Wake cuff / take a reading. If a 6-digit code appears on the LCD, type it in Passkey and click Send passkey.)');
       
       // Poll for mid-pair passkey request while fetch is in flight
       let pollTimer = setInterval(async () => {
@@ -731,11 +745,17 @@
           const st = await (await fetch('/pair/passkey')).json();
           if (st.need_passkey) {
             if (hint) hint.classList.remove('hidden');
-            logBox.innerText += `\n⏳ Cuff wants passkey — enter 6 digits from LCD, then Send passkey.`;
-            // Auto-submit if field already filled
-            const pk = (document.getElementById('pairPasskey').value || '').trim();
-            if (pk.replace(/\D/g, '').length >= 4) {
-              await sendPasskeyNow();
+            const hintText = document.getElementById('passkeyHintText');
+            if (hintText) {
+              hintText.innerText = st.message || 'Enter the 6-digit code from the cuff LCD.';
+            }
+            logBox.innerText += `\n⏳ ${st.message || 'Cuff wants passkey — enter 6 digits from LCD.'}`;
+            // Auto-submit if field already filled (Linux only)
+            if (st.passkey_via_ui) {
+              const pk = (document.getElementById('pairPasskey').value || '').trim();
+              if (pk.replace(/\D/g, '').length >= 4) {
+                await sendPasskeyNow();
+              }
             }
           }
         } catch (_) {}
@@ -763,9 +783,14 @@
         updateHealth();
       } catch (e) {
         logBox.innerText += `\nError: ${e.message}`;
+        const onWindows = __platform && __platform.os === 'windows';
         if (/passkey|auth|bond/i.test(e.message || '')) {
-          logBox.innerText += `\nTip: Type the 6-digit code from the cuff into Passkey, then Pair again (or Send passkey if still waiting).`;
-          if (hint) hint.classList.remove('hidden');
+          if (onWindows) {
+            logBox.innerText += `\nTip: Look for the Windows Bluetooth pairing popup in your taskbar and enter the 6-digit code from the cuff there.`;
+          } else {
+            logBox.innerText += `\nTip: Type the 6-digit code from the cuff into Passkey, then Pair again (or Send passkey if still waiting).`;
+            if (hint) hint.classList.remove('hidden');
+          }
         }
       } finally {
         clearInterval(pollTimer);
@@ -776,6 +801,12 @@
       const passkey = (document.getElementById('pairPasskey').value || '').trim();
       const logBox = document.getElementById('pairLog');
       const hint = document.getElementById('passkeyHint');
+      const onWindows = __platform && __platform.os === 'windows';
+      
+      if (onWindows) {
+        logBox.innerText += `\n⚠ Passkey entry via UI not available on Windows. Check your taskbar for the Bluetooth pairing popup.`;
+        return;
+      }
       
       if (!passkey) {
         alert("Please enter the 6-digit code from the device screen.");

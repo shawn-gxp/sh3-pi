@@ -38,7 +38,8 @@ class BeurerPlugin(DevicePlugin):
         # passkey = 6-digit code from cuff LCD (Beurer BM54 etc.)
         pk = passkey if passkey is not None else kwargs.get("passkey")
         if isinstance(pk, str) and pk.strip():
-            pk = int("".join(c for c in pk if c.isdigit()) or "0") or None
+            digits = "".join(c for c in pk if c.isdigit())
+            pk = int(digits) if digits else None
         sess = BeurerCompanionSession(
             mac,
             model_id=model or "BM54",
@@ -55,15 +56,15 @@ class BeurerPlugin(DevicePlugin):
     async def run_session(self, mac: str, model: str, **kwargs: Any) -> SessionResult:
         from medical_ble_toolkit.brands.beurer.session import BeurerCompanionSession
         find_timeout = float(kwargs.get("find_timeout") or 0.0)
-        # Hub already saw AD → quick connect; UI pair uses defaults above
         connect_timeout = 12.0 if find_timeout <= 0 else 20.0
         pk = kwargs.get("passkey")
         if isinstance(pk, str) and pk.strip():
-            pk = int("".join(c for c in pk if c.isdigit()) or "0") or None
+            digits = "".join(c for c in pk if c.isdigit())
+            pk = int(digits) if digits else None
         sess = BeurerCompanionSession(
             mac,
             model_id=model or "BM54",
-            pair=True,
+            pair=bool(kwargs.get("force_pair", False)),
             connect_timeout=connect_timeout,
             connect_retries=2,
             passkey=pk if isinstance(pk, int) else None,

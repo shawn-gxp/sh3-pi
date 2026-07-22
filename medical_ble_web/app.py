@@ -167,6 +167,7 @@ async def health() -> Dict[str, Any]:
         mqtt_st = mqtt_bridge.status()
     except Exception as exc:  # noqa: BLE001
         mqtt_st = {"error": str(exc)}
+    from medical_ble_toolkit.common.winrt_errors import is_windows, is_linux
     return {
         "ok": True,
         "service": "medical_ble_hub",
@@ -175,6 +176,10 @@ async def health() -> Dict[str, Any]:
         "daemon": daemon_status(),
         "hub": hub_cfg,
         "mqtt": mqtt_st,
+        "platform": {
+            "os": "windows" if is_windows() else "linux" if is_linux() else "macos",
+            "passkey_via_ui": is_linux(),
+        },
     }
 
 

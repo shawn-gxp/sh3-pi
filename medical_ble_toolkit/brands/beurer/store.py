@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
@@ -14,8 +15,18 @@ log = logging.getLogger("medical_ble.beurer.store")
 STORE_NAME = "beurer_sync_state.json"
 
 
+def _state_dir() -> Path:
+    env = (os.environ.get("MEDICAL_BLE_STATE_DIR") or "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    pkg = Path(__file__).resolve().parents[3] / "medical_ble_web" / "data"
+    if pkg.is_dir():
+        return pkg
+    return Path.cwd()
+
+
 def _path() -> Path:
-    return Path.cwd() / STORE_NAME
+    return _state_dir() / STORE_NAME
 
 
 def load_state() -> dict:

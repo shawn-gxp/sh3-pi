@@ -195,15 +195,12 @@ class BeurerCompanionSession:
                 self._parser.model = self.model_id
             except Exception:
                 pass
-        # pulse_swapped on BLP parser
         if isinstance(self._parser, BlpBloodPressureParser):
             self._parser.pulse_swapped = self.caps.pulse_swapped
-        elif self.toolkit_profile in ("beurer_bp", "beurer_bm54", "beurer_ecg"):
-            # re-wrap with swapped flag for parse path
+        if self.toolkit_profile in ("beurer_bp", "beurer_bm54", "beurer_ecg"):
             self._pulse_swapped = self.caps.pulse_swapped
         else:
             self._pulse_swapped = False
-        self._pulse_swapped = self.caps.pulse_swapped
 
         self.readings: List[Any] = []
         self.raw: List[dict] = []
@@ -448,10 +445,16 @@ class BeurerCompanionSession:
         self._paired_attempt = True
         log.info("[PAIR] OS bond (companion pairing)…")
         if self.passkey_hint:
-            log.info(
-                "[PAIR] Passkey model — enter 6-digit code from cuff LCD in the hub UI "
-                "(or pass passkey=). Agent waits up to 90s."
-            )
+            if sys.platform == "win32":
+                log.info(
+                    "[PAIR] Passkey model — check the Windows taskbar for a Bluetooth "
+                    "pairing popup and enter the 6-digit code from the cuff LCD there."
+                )
+            else:
+                log.info(
+                    "[PAIR] Passkey model — enter 6-digit code from cuff LCD in the hub UI "
+                    "(or pass passkey=). Agent waits up to 90s."
+                )
         try:
             # Use shared BlueZ agent path (Just Works or KeyboardDisplay+passkey)
             from medical_ble_toolkit.brands.omron.ble.connection import pair_client
@@ -641,6 +644,7 @@ class BeurerCompanionSession:
 
         if pid == "beurer_po60":
             await asyncio.sleep(0.5)
+            self._po60_need_more = False
             await self._po60_request_more()
 
     async def listen(self) -> None:

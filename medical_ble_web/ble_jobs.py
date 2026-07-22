@@ -455,6 +455,14 @@ def _parse_passkey(value: Any) -> Optional[int]:
 
 def pair_passkey_status() -> Dict[str, Any]:
     """UI poll: is BlueZ agent waiting for a 6-digit passkey?"""
+    from medical_ble_toolkit.common.winrt_errors import is_windows
+    if is_windows():
+        return {
+            "ok": True,
+            "need_passkey": False,
+            "passkey_via_ui": False,
+            "message": "On Windows, enter the passkey in the Bluetooth pairing popup (check taskbar).",
+        }
     try:
         from medical_ble_toolkit.brands.omron.ble.bluez_agent import GLOBAL_PASSKEY_BROKER
 
@@ -464,6 +472,7 @@ def pair_passkey_status() -> Dict[str, Any]:
             "need_passkey": bool(st.get("waiting")),
             "has_passkey": bool(st.get("has_passkey")),
             "device": st.get("device") or "",
+            "passkey_via_ui": True,
             "message": (
                 "Enter the 6-digit code shown on the cuff LCD"
                 if st.get("waiting")
@@ -476,6 +485,12 @@ def pair_passkey_status() -> Dict[str, Any]:
 
 def provide_pair_passkey(passkey: Any) -> Dict[str, Any]:
     """UI submit: feed passkey to the in-flight BlueZ agent."""
+    from medical_ble_toolkit.common.winrt_errors import is_windows
+    if is_windows():
+        raise RuntimeError(
+            "Passkey entry via web UI is not supported on Windows. "
+            "Enter the passkey in the Windows Bluetooth pairing popup (check your taskbar)."
+        )
     pk = _parse_passkey(passkey)
     if pk is None:
         raise ValueError("Passkey must be 4–6 digits from the cuff display")
