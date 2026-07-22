@@ -771,6 +771,32 @@
       }
     }
 
+    async function sendPasskeyNow() {
+      const passkey = (document.getElementById('pairPasskey').value || '').trim();
+      const logBox = document.getElementById('pairLog');
+      const hint = document.getElementById('passkeyHint');
+      
+      if (!passkey) {
+        alert("Please enter the 6-digit code from the device screen.");
+        return;
+      }
+      
+      try {
+        const res = await fetch('/pair/passkey', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ passkey })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail?.error || data.error || 'Failed to send passkey');
+        
+        logBox.innerText += `\n✅ ${data.message}`;
+        if (hint) hint.classList.add('hidden');
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
     async function fetchPatientId() {
       try {
         const res = await fetch('/settings/patient');
