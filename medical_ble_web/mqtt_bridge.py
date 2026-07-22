@@ -227,17 +227,22 @@ def _heartbeat_loop() -> None:
 def _drain_outbox_async():
     def _drain():
         try:
-            from db import pop_mqtt_outbox # type: ignore
-            items = pop_mqtt_outbox(limit=20)
+            from db import peek_mqtt_outbox, delete_mqtt_outbox_items  # type: ignore
+            items = peek_mqtt_outbox(limit=20)
             if items:
                 log.info("[MQTT] draining %d items from outbox", len(items))
+            sent_ids: List[int] = []
             for item in items:
                 try:
                     payload = json.loads(item["payload_json"])
-                    _publish_raw(item["topic"], payload, qos=item["qos"], bypass_outbox=True)
+                    ok = _publish_raw(item["topic"], payload, qos=item["qos"], bypass_outbox=True)
+                    if ok:
+                        sent_ids.append(int(item["id"]))
                     time.sleep(0.05)
                 except Exception:
                     pass
+            if sent_ids:
+                delete_mqtt_outbox_items(sent_ids)
         except Exception as e:
             log.warning("MQTT outbox drain error: %s", e)
     threading.Thread(target=_drain, name="mqtt-outbox", daemon=True).start()

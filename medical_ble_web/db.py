@@ -568,20 +568,30 @@ def insert_mqtt_outbox(topic: str, payload_json: str, qos: int = 1) -> None:
         )
 
 
-def pop_mqtt_outbox(limit: int = 20) -> List[Dict[str, Any]]:
-    """Returns up to `limit` outbox items and deletes them from the outbox."""
+def peek_mqtt_outbox(limit: int = 20) -> List[Dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             "SELECT id, topic, payload_json, qos, attempts FROM mqtt_outbox ORDER BY id ASC LIMIT ?",
             (limit,)
         ).fetchall()
-        
-        items = [dict(r) for r in rows]
-        if items:
-            placeholders = ",".join("?" for _ in items)
-            conn.execute(
-                f"DELETE FROM mqtt_outbox WHERE id IN ({placeholders})",
-                [i["id"] for i in items],
-            )
-        return items
+        return [dict(r) for r in rows]
+
+
+def delete_mqtt_outbox_items(ids: List[int]) -> None:
+    if not ids:
+        return
+    with connect() as conn:
+        placeholders = ",".join("?" for _ in ids)
+        conn.execute(
+            f"DELETE FROM mqtt_outbox WHERE id IN ({placeholders})",
+            ids,
+        )
+
+
+def pop_mqtt_outbox(limit: int = 20) -> List[Dict[str, Any]]:
+    """Returns up to `limit` outbox items and deletes them from the outbox."""
+    items = peek_mqtt_outbox(limit=limit)
+    if items:
+        delete_mqtt_outbox_items([i["id"] for i in items])
+    return items
 
