@@ -41,6 +41,11 @@ def reset_db(path: Path = DB_PATH) -> None:
 def init_db(path: Path = DB_PATH) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with connect(path) as conn:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.Error:
+            pass
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS devices (
@@ -123,8 +128,6 @@ def connect(path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA busy_timeout=30000")
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
     except sqlite3.Error:
         pass
     try:
@@ -575,7 +578,10 @@ def pop_mqtt_outbox(limit: int = 20) -> List[Dict[str, Any]]:
         
         items = [dict(r) for r in rows]
         if items:
-            ids = ",".join(str(i["id"]) for i in items)
-            conn.execute(f"DELETE FROM mqtt_outbox WHERE id IN ({ids})")
+            placeholders = ",".join("?" for _ in items)
+            conn.execute(
+                f"DELETE FROM mqtt_outbox WHERE id IN ({placeholders})",
+                [i["id"] for i in items],
+            )
         return items
 

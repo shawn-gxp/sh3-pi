@@ -46,7 +46,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "Omron support requires medical_ble_toolkit.brands.omron "
-        "(bundled under medical_ble_toolkit/omron_bp/)."
+        "(bundled under medical_ble_toolkit/brands/omron/)."
     ) from exc
 
 

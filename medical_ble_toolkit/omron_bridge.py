@@ -45,7 +45,7 @@ def _require_omron_bp():
     except ImportError as exc:
         raise ImportError(
             "Omron support requires medical_ble_toolkit.brands.omron "
-            "(bundled under medical_ble_toolkit/omron_bp/)."
+            "(bundled under medical_ble_toolkit/brands/omron/)."
         ) from exc
     return get_profile, list_models, pair_device, read_device_records, write_users_csv
 

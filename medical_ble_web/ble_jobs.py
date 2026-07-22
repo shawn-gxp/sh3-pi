@@ -564,14 +564,24 @@ async def job_pair(
                 import medical_ble_toolkit.brands  # noqa: F401
                 from medical_ble_toolkit.core.registry import get_plugin
 
-                await get_plugin(profile.brand).pair(mac_u, model, force_rebind=repair)
+                res = await get_plugin(profile.brand).pair(mac_u, model, force_rebind=repair)
+                if hasattr(res, "ok") and not res.ok:
+                    raise BleJobError(
+                        getattr(res, "error", "") or f"Omron pair failed for {mac_u}",
+                        code="PAIR_FAILED",
+                    )
             elif brand_info.get("is_beurer") or profile.brand == "beurer":
                 import medical_ble_toolkit.brands  # noqa: F401
                 from medical_ble_toolkit.core.registry import get_plugin
 
-                await get_plugin("beurer").pair(
+                res = await get_plugin("beurer").pair(
                     mac_u, model, force_rebind=repair, passkey=pk
                 )
+                if hasattr(res, "ok") and not res.ok:
+                    raise BleJobError(
+                        getattr(res, "error", "") or f"Beurer pair failed for {mac_u}",
+                        code="PAIR_FAILED",
+                    )
             else:
                 await _generic_pair(
                     brand_id=profile.brand,

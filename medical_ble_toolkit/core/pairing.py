@@ -15,5 +15,6 @@ from .registry import get_plugin
 
 
 async def pair_device(brand_id: str, mac: str, model: str, *, repair: bool = False) -> PairResult:
+    import medical_ble_toolkit.brands  # noqa: F401
     plugin = get_plugin(brand_id)
     return await plugin.pair(mac, model, force_rebind=repair)
