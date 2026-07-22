@@ -312,9 +312,10 @@
                    onclick="sendPasskeyNow()" title="If Pair is waiting for the code">Send passkey</button></label>
         </div>
         <p id="pairBrandNotes" style="font-size: 0.85rem; color: var(--muted); margin: 0.25rem 0 0;"></p>
-        <p id="passkeyHint" class="hidden" style="font-size: 0.85rem; color: var(--warn); margin: 0.4rem 0 0;">
-          Cuff is showing a 6-digit code — type it above and click <b>Send passkey</b> (or re-Pair with the field filled).
-        </p>
+        <div id="passkeyHint" class="hidden" style="margin-top: 1rem; padding: 1rem; background: rgba(240, 180, 41, 0.15); border: 1px solid var(--warn); border-radius: 6px; color: var(--text);">
+          <div style="font-weight: bold; color: var(--warn); margin-bottom: 0.5rem; font-size: 1.1rem;">🔑 Waiting for Passkey</div>
+          The cuff is now showing a 6-digit code on its LCD. Type it into the Passkey field above and click <b>Send passkey</b> to complete bonding.
+        </div>
         <div id="pairLog" class="log-box hidden"></div>
       </div>
     </section>
