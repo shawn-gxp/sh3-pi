@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -193,34 +194,57 @@ def _pick_newest(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 @asynccontextmanager
 async def _pause_hub_for_manual(reason: str = "manual"):
     """
-    Yield radio to UI Scan/Pair: pause hub hunt, wait for concurrent workers
-    to finish (or timeout), then hold _ble_lock so BlueZ is not double-scanned.
+    Yield radio to UI Scan/Pair: pause hub hunt, cancel workers, wait briefly
+    for the shared radio lock, then run the manual op.
+
+    Kept short on purpose — old path could block ~120s waiting for Mighty/Omron
+    sessions, which made Pair feel broken.
     """
     hub = _daemon_hub
+    # Scan needs radio fast; pair slightly longer for disconnect cleanup
+    max_wait_s = 6.0 if reason == "scan" else 12.0
     if hub is not None:
         try:
-            hub.request_manual_pause()
+            hub.request_manual_pause(cancel_workers=True)
+        except TypeError:
+            # Older hub without cancel_workers kw
+            try:
+                hub.request_manual_pause()
+            except Exception as exc:  # noqa: BLE001
+                log.debug("hub pause: %s", exc)
         except Exception as exc:  # noqa: BLE001
             log.debug("hub pause: %s", exc)
-        # Wait until no concurrent workers (up to ~120s for MightySat stream)
-        for _ in range(400):
+        deadline = asyncio.get_event_loop().time() + max_wait_s
+        while asyncio.get_event_loop().time() < deadline:
             try:
-                n = 0
-                if hasattr(hub, "conn_mgr"):
-                    n = hub.conn_mgr.active_count
-                phase = (hub.status.phase or "") if hub else ""
+                n = hub.conn_mgr.active_count if hasattr(hub, "conn_mgr") else 0
             except Exception:
                 n = 0
-                phase = ""
-            if n <= 0 and phase not in ("session", "concurrent"):
+            # Free as soon as no slots — do not key off phase (can be stale)
+            if n <= 0:
                 break
-            await asyncio.sleep(0.3)
-        await asyncio.sleep(0.35)
+            await asyncio.sleep(0.15)
+        await asyncio.sleep(0.15)
     try:
-        async with _ble_lock:
+        # Don't hang forever if another job holds the radio
+        try:
+            await asyncio.wait_for(_ble_lock.acquire(), timeout=max_wait_s)
+        except asyncio.TimeoutError as exc:
+            raise BleJobError(
+                f"Radio busy after {max_wait_s:.0f}s — try again in a moment",
+                code="RADIO_BUSY",
+                tips=[
+                    "Hub was mid-transfer; wait a few seconds and retry Scan/Pair.",
+                    "Stop Auto-sync if it keeps holding the radio.",
+                ],
+                retryable=True,
+            ) from exc
+        try:
             log.info("[RADIO] manual op start (%s)", reason)
             yield
             log.info("[RADIO] manual op end (%s)", reason)
+        finally:
+            _ble_lock.release()
     finally:
         if hub is not None:
             try:
@@ -229,12 +253,63 @@ async def _pause_hub_for_manual(reason: str = "manual"):
                 log.debug("hub unpause: %s", exc)
 
 
+# Substring hits that uniquely indicate medical meters (avoid "FT_Play" etc.)
+_MEDICAL_NAME_SUBSTR = (
+    "blesmart",
+    "omron",
+    "hem-",
+    "nbp-1",
+    "nbp_1",
+    "nt-100",
+    "nt100",
+    "mightysat",
+    "masimo",
+    "beurer",
+    "bm54",
+    "po60",
+    "gl50",
+    "gl44",
+    "gl48",
+    "ft95",
+    "ft85",
+)
+
+# Whole-name or prefix+digit patterns (Beurer BM54, GL50, FT95…)
+_MEDICAL_SKU_RE = re.compile(
+    r"^(BM|BC|GL|FT|PO|BF|ME|AS)\d",
+    re.IGNORECASE,
+)
+_MEDICAL_OTHER_RE = re.compile(
+    r"^(HEM[-_]?\d|NBP|NT[-_]?100|BLESmart)",
+    re.IGNORECASE,
+)
+
+
+def _medical_rank(name: str) -> int:
+    """
+    Lower = higher priority in scan list.
+      0 medical name match
+      1 other named device
+      2 anonymous / no name
+    """
+    n = (name or "").strip()
+    if not n or n.lower() in ("(no name)", "-"):
+        return 2
+    n_l = n.lower()
+    for h in _MEDICAL_NAME_SUBSTR:
+        if h in n_l:
+            return 0
+    if _MEDICAL_SKU_RE.match(n) or _MEDICAL_OTHER_RE.match(n):
+        return 0
+    return 1
+
+
 async def job_scan(
     *,
     brand_id: Optional[str] = None,
     timeout: float = 8.0,
 ) -> List[Dict[str, Any]]:
-    """Scan nearby BLE devices; optionally filter by brand profile hints."""
+    """Scan nearby BLE devices; medical-looking names sorted first."""
     from medical_ble_toolkit.ble_client import scan_devices
     from medical_ble_toolkit.profiles import get_profile
 
@@ -250,25 +325,32 @@ async def job_scan(
     use_profile = profile if brand_id else None
     devices: List[Any] = []
     last_err: Optional[BaseException] = None
+    # One solid pass (timeout already 8–12s). Second full pass doubled latency.
+    scan_timeout = max(4.0, min(float(timeout), 20.0))
 
     async with _pause_hub_for_manual("scan"):
-        for attempt in (1, 2):
+        try:
+            devices = await scan_devices(
+                profile=use_profile,
+                timeout=scan_timeout,
+                retries=1,
+            )
+            last_err = None
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            log.warning("job_scan: %s", exc)
+            # Single short retry only on hard failure
             try:
+                await asyncio.sleep(0.4)
                 devices = await scan_devices(
                     profile=use_profile,
-                    timeout=timeout,
-                    retries=2,
+                    timeout=min(scan_timeout, 6.0),
+                    retries=1,
                 )
                 last_err = None
-                if devices:
-                    break
-                # Empty list can mean BlueZ busy returned [] — brief retry
-                if attempt == 1:
-                    await asyncio.sleep(0.8)
-            except Exception as exc:  # noqa: BLE001
-                last_err = exc
-                log.warning("job_scan attempt %d: %s", attempt, exc)
-                await asyncio.sleep(0.8)
+            except Exception as exc2:  # noqa: BLE001
+                last_err = exc2
+                log.warning("job_scan retry: %s", exc2)
 
     out: List[Dict[str, Any]] = []
     for d in devices or []:
@@ -279,19 +361,22 @@ async def job_scan(
                 rssi = int(rssi)
             except (TypeError, ValueError):
                 rssi = None
+        name = (getattr(d, "name", None) or "") or "(no name)"
         out.append(
             {
                 "mac": mac,
                 "address": mac,  # alias for older UI / clients
-                "name": (getattr(d, "name", None) or "") or "(no name)",
+                "name": name,
                 "rssi": rssi,
+                "medical": _medical_rank(name) == 0,
             }
         )
-    # Prefer named / medical-looking first for UI
+    # Medical first, then named, then by strongest RSSI
     def _rank(row: Dict[str, Any]) -> tuple:
-        n = (row.get("name") or "").lower()
-        named = 0 if n and n != "(no name)" else 1
-        return (named, -(row.get("rssi") or -999))
+        return (
+            _medical_rank(str(row.get("name") or "")),
+            -(row.get("rssi") or -999),
+        )
 
     out.sort(key=_rank)
     db.save_scan_hits(out)
@@ -350,6 +435,47 @@ def _omron_fe4a_error(exc: BaseException) -> BleJobError:
     )
 
 
+def _parse_passkey(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    digits = "".join(c for c in str(value) if c.isdigit())
+    if not digits:
+        return None
+    return int(digits[-6:]) if len(digits) > 6 else int(digits)
+
+
+def pair_passkey_status() -> Dict[str, Any]:
+    """UI poll: is BlueZ agent waiting for a 6-digit passkey?"""
+    try:
+        from medical_ble_toolkit.brands.omron.ble.bluez_agent import GLOBAL_PASSKEY_BROKER
+
+        st = GLOBAL_PASSKEY_BROKER.status()
+        return {
+            "ok": True,
+            "need_passkey": bool(st.get("waiting")),
+            "has_passkey": bool(st.get("has_passkey")),
+            "device": st.get("device") or "",
+            "message": (
+                "Enter the 6-digit code shown on the cuff LCD"
+                if st.get("waiting")
+                else ""
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "need_passkey": False, "error": str(exc)}
+
+
+def provide_pair_passkey(passkey: Any) -> Dict[str, Any]:
+    """UI submit: feed passkey to the in-flight BlueZ agent."""
+    pk = _parse_passkey(passkey)
+    if pk is None:
+        raise ValueError("Passkey must be 4–6 digits from the cuff display")
+    from medical_ble_toolkit.brands.omron.ble.bluez_agent import GLOBAL_PASSKEY_BROKER
+
+    GLOBAL_PASSKEY_BROKER.provide(pk)
+    return {"ok": True, "passkey_set": True, "message": f"Passkey {pk:06d} sent to agent"}
+
+
 async def job_pair(
     *,
     brand_id: str,
@@ -357,6 +483,7 @@ async def job_pair(
     model: str = "",
     name: str = "",
     repair: bool = False,
+    passkey: Any = None,
 ) -> Dict[str, Any]:
     # We kept the param name "brand_id" for backward compatibility with the HTTP route,
     # but the UI actually sends the `profile_id` (e.g. "nipro_nt100b", "mightysat").
@@ -368,11 +495,17 @@ async def job_pair(
 
     from medical_ble_toolkit.profiles import get_profile
     profile = get_profile(profile_id)
-    
+
+    pk = _parse_passkey(passkey)
     model = model or brand_info.get("default_model") or ""
     mac_u = mac.strip().upper()
     adv_name = (name or model or brand_info.get("default_model") or "").strip()
-    
+
+    # Remember if this MAC was already a real hub bond — failed pair must not
+    # leave a ghost card on the dashboard (paired=0 stub from a prior attempt).
+    prior = db.get_device_by_mac(mac_u)
+    was_paired = bool(prior and prior.get("paired"))
+
     device = db.upsert_device(
         profile_id=profile_id,
         brand=brand_info.get("company", ""),
@@ -386,6 +519,17 @@ async def job_pair(
     )
 
     try:
+        # Seed passkey broker early so UI can also POST /pair/passkey mid-flight
+        if pk is not None or brand_info.get("is_beurer") or profile_id.startswith("beurer"):
+            try:
+                from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
+                    GLOBAL_PASSKEY_BROKER,
+                )
+
+                GLOBAL_PASSKEY_BROKER.reset(preset=pk)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("passkey broker reset: %s", exc)
+
         # Pause hub hunt so BlueZ is free for OS pair / GATT
         async with _pause_hub_for_manual("repair" if repair else "pair"):
             if brand_info.get("is_omron"):
@@ -394,6 +538,13 @@ async def job_pair(
                 from medical_ble_toolkit.core.registry import get_plugin
 
                 await get_plugin(profile.brand).pair(mac_u, model, force_rebind=repair)
+            elif brand_info.get("is_beurer") or profile.brand == "beurer":
+                import medical_ble_toolkit.brands  # noqa: F401
+                from medical_ble_toolkit.core.registry import get_plugin
+
+                await get_plugin("beurer").pair(
+                    mac_u, model, force_rebind=repair, passkey=pk
+                )
             else:
                 await _generic_pair(
                     brand_id=profile.brand,
@@ -458,6 +609,12 @@ async def job_pair(
             out["next_steps"] = hub_tips + [
                 "Put finger in sensor — hub starts full live SpO2 stream on AD.",
             ]
+        elif brand_info.get("is_beurer") or profile_id.startswith("beurer"):
+            out["next_steps"] = hub_tips + [
+                "Beurer: unpair phone Beurer app first (one bond).",
+                "If the cuff shows a 6-digit code: type it in Passkey before/during Pair.",
+                "Measure on the device — hub connects on advertisement and dumps history.",
+            ]
         else:
             out["next_steps"] = hub_tips
             
@@ -475,6 +632,17 @@ async def job_pair(
         return out
     except Exception as exc:  # noqa: BLE001
         db.end_session(sid, "fail", error=str(exc))
+        # Drop unpaired stub so failed Pair does not look like a hub device
+        if not was_paired:
+            try:
+                db.delete_device(mac_u)
+                log.info(
+                    "[PAIR] removed unpaired stub mac=%s after fail: %s",
+                    mac_u,
+                    exc,
+                )
+            except Exception as del_exc:  # noqa: BLE001
+                log.warning("delete unpaired stub %s: %s", mac_u, del_exc)
         raise
 
 
@@ -1792,6 +1960,20 @@ _PROFILE_TO_HUB_BRAND = {
     "thermo": "thermo",
     "mightysat": "masimo",
     "masimo": "masimo",
+    # Beurer family → single hub policy brand (plugin beurer / windowed)
+    "beurer": "beurer",
+    "beurer_bp": "beurer",
+    "beurer_bm54": "beurer",
+    "beurer_glucose": "beurer",
+    "beurer_thermo": "beurer",
+    "beurer_po60": "beurer",
+    "beurer_scale": "beurer",
+    "beurer_ecg": "beurer",
+    "beurer_as87": "beurer",
+    "beurer_as98": "beurer",
+    "beurer_as99": "beurer",
+    "beurer_tracker_legacy": "beurer",
+    "beurer_hydration": "beurer",
 }
 
 
@@ -1809,6 +1991,9 @@ def _hub_policy_brand(device: Dict[str, Any]) -> str:
     pid = (device.get("profile_id") or "").strip().lower()
     if pid in _PROFILE_TO_HUB_BRAND:
         return _PROFILE_TO_HUB_BRAND[pid]
+    # Any future beurer_* profile
+    if pid.startswith("beurer"):
+        return "beurer"
     if pid:
         return pid
     # Last resort: only works when display brand happens to match (e.g. "Omron")

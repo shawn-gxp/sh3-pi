@@ -295,16 +295,26 @@
         <h3 style="margin-top: 0;">2. Pair Selected Device</h3>
         <div class="row">
           <label>MAC Address <input type="text" id="pairMac" readonly /></label>
-          <label>Brand
-            <select id="pairBrand">
-              <option value="omron">Omron (BP)</option>
-              <option value="nipro_nbp">Nipro NBP (BP)</option>
-              <option value="nipro_nt100b">Nipro NT-100B (Temp)</option>
-              <option value="mightysat">Masimo MightySat (SpO2)</option>
+          <label>Advertised name <input type="text" id="pairName" placeholder="from scan" /></label>
+          <label>Brand / profile
+            <select id="pairBrand" onchange="onPairBrandChange()">
+              <option value="">Loading…</option>
             </select>
           </label>
+          <label>Model <input type="text" id="pairModel" placeholder="e.g. BM54" /></label>
+          <label id="passkeyWrap">Passkey (from cuff LCD)
+            <input type="text" id="pairPasskey" inputmode="numeric" maxlength="6"
+                   pattern="[0-9]*" placeholder="6 digits e.g. 123456"
+                   autocomplete="one-time-code" />
+          </label>
           <label><br><button onclick="executePair()">Pair Device</button></label>
+          <label><br><button type="button" class="secondary" id="btnSendPasskey"
+                   onclick="sendPasskeyNow()" title="If Pair is waiting for the code">Send passkey</button></label>
         </div>
+        <p id="pairBrandNotes" style="font-size: 0.85rem; color: var(--muted); margin: 0.25rem 0 0;"></p>
+        <p id="passkeyHint" class="hidden" style="font-size: 0.85rem; color: var(--warn); margin: 0.4rem 0 0;">
+          Cuff is showing a 6-digit code — type it above and click <b>Send passkey</b> (or re-Pair with the field filled).
+        </p>
         <div id="pairLog" class="log-box hidden"></div>
       </div>
     </section>
@@ -328,11 +338,118 @@
 
   <script>
     let ws = null;
+    /** @type {Array<{id:string,label:string,company:string,default_model:string,tier1:boolean,notes:string,is_beurer?:boolean}>} */
+    let brandCatalog = [];
 
     async function init() {
+      await loadBrandOptions();
       await updateHealth();
       await fetchPatientId();
       connectWS();
+    }
+
+    async function loadBrandOptions() {
+      const sel = document.getElementById('pairBrand');
+      try {
+        // Include advanced so Beurer scale/ECG and lab brands are available
+        const res = await fetch('/brands?all=true');
+        const data = await res.json();
+        brandCatalog = data.brands || [];
+        const tier1 = brandCatalog.filter(b => b.tier1);
+        const adv = brandCatalog.filter(b => !b.tier1);
+        const optHtml = (list) => list.map(b =>
+          `<option value="${b.id}" data-model="${(b.default_model || '').replace(/"/g, '&quot;')}">${escHtml(b.label || b.id)}</option>`
+        ).join('');
+        sel.innerHTML =
+          `<optgroup label="Hub devices">${optHtml(tier1)}</optgroup>` +
+          (adv.length ? `<optgroup label="Advanced / lab">${optHtml(adv)}</optgroup>` : '');
+        if (tier1.length) {
+          sel.value = tier1[0].id;
+          onPairBrandChange();
+        }
+      } catch (e) {
+        console.warn('brand catalog load failed', e);
+        sel.innerHTML = `
+          <option value="omron">Omron BP</option>
+          <option value="nipro_nbp">Nipro NBP</option>
+          <option value="nipro_nt100b">Nipro NT-100B</option>
+          <option value="mightysat">Masimo MightySat</option>
+          <option value="beurer_bp">Beurer BP (BM/BC)</option>
+          <option value="beurer_glucose">Beurer Glucose</option>
+          <option value="beurer_thermo">Beurer Thermometer</option>
+          <option value="beurer_po60">Beurer PO60</option>`;
+      }
+    }
+
+    function escHtml(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function onPairBrandChange() {
+      const sel = document.getElementById('pairBrand');
+      const modelIn = document.getElementById('pairModel');
+      const notes = document.getElementById('pairBrandNotes');
+      const pkWrap = document.getElementById('passkeyWrap');
+      const b = brandCatalog.find(x => x.id === sel.value);
+      if (b) {
+        if (!modelIn.value || modelIn.dataset.fromBrand === '1') {
+          modelIn.value = b.default_model || '';
+          modelIn.dataset.fromBrand = '1';
+        }
+        notes.textContent = b.notes || '';
+        // Beurer BP/glucose often show a 6-digit passkey on the LCD
+        const needsPk = !!(b.is_beurer || (b.id || '').startsWith('beurer'));
+        if (pkWrap) pkWrap.style.display = needsPk ? '' : 'none';
+        if (needsPk) {
+          notes.textContent = (b.notes || '') +
+            ' · When the cuff shows a 6-digit code, type it in Passkey and Pair (or Send passkey while waiting).';
+        }
+      } else {
+        notes.textContent = '';
+      }
+    }
+
+    async function sendPasskeyNow() {
+      const pk = (document.getElementById('pairPasskey').value || '').trim();
+      const logBox = document.getElementById('pairLog');
+      const hint = document.getElementById('passkeyHint');
+      if (!pk || pk.replace(/\D/g, '').length < 4) {
+        alert('Enter the 4–6 digit code from the cuff LCD first.');
+        return;
+      }
+      try {
+        const res = await fetch('/pair/passkey', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ passkey: pk })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.error || 'Failed to send passkey');
+        if (logBox) {
+          logBox.classList.remove('hidden');
+          logBox.innerText += `\nPasskey sent to pairing agent.`;
+        }
+        if (hint) hint.classList.add('hidden');
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    }
+
+    /** Guess profile_id from BLE advertisement name */
+    function guessBrandFromName(name) {
+      const n = (name || '').toLowerCase();
+      if (!n) return null;
+      if (n.includes('blesmart') || n.includes('hem-') || n.includes('omron')) return 'omron';
+      if (n.includes('nbp')) return 'nipro_nbp';
+      if (n.includes('nt-100') || n.includes('nt100')) return 'nipro_nt100b';
+      if (n.includes('mightysat') || n.includes('masimo')) return 'mightysat';
+      if (n.includes('po60') || n.includes('po 60')) return 'beurer_po60';
+      if (/\bgl\d*/.test(n) || n.includes('glucose')) return 'beurer_glucose';
+      if (/\bft\d*/.test(n)) return 'beurer_thermo';
+      if (n.includes('beurer') || /\bbm\d*/.test(n) || /\bbc\d*/.test(n)) return 'beurer_bp';
+      if (/\bbf\d*/.test(n)) return 'beurer_scale';
+      if (n.includes('ecg') || /\bme\d*/.test(n)) return 'beurer_ecg';
+      return null;
     }
 
     async function updateHealth() {
@@ -403,10 +520,11 @@
         const mac = (device.mac || '').toUpperCase();
         const isHighlight = mac && mac === (highlightMac || '').toUpperCase() ? 'highlight' : '';
         const isOnline = device.online ? 'online' : '';
-        const statusText = device.online ? 'Online' : 'Offline';
+        // Dashboard only receives paired devices; Offline = bonded but not transferring
+        const statusText = device.online ? 'Online' : 'Paired · idle';
         const title = device.name || device.model || device.brand || 'Device';
         
-        let vitalsHtml = '<div class="vital-empty">No readings yet</div>';
+        let vitalsHtml = '<div class="vital-empty">No readings yet — wake device / measure to sync</div>';
         if (device.vitals) {
           const v = device.vitals;
           const parts = [];
@@ -501,14 +619,15 @@
     async function startScan() {
       const btn = document.getElementById('btnScan');
       const st = document.getElementById('scanStatus');
-      const timeoutSec = 8;
+      // Longer window: Beurer BM54 / Nipro only advertise briefly after measure
+      const timeoutSec = 12;
       btn.disabled = true;
       document.getElementById('scanResults').classList.add('hidden');
 
       let left = timeoutSec;
       const setScanLabel = () => {
         st.innerText = left > 0
-          ? `Scanning… ${left}s remaining`
+          ? `Scanning… ${left}s remaining (wake cuff / take a reading first)`
           : 'Still scanning…';
       };
       setScanLabel();
@@ -527,22 +646,40 @@
 
         if (!res.ok) throw new Error(data.detail?.error || 'Scan failed');
 
-        st.innerText = `Found ${data.count} devices.`;
+        const named = (data.devices || []).filter(d => {
+          const n = (d.name || '').trim();
+          return n && n !== '(no name)' && n !== '-';
+        });
+        st.innerText = `Found ${data.count} device(s)` +
+          (named.length ? ` · ${named.length} with name` : '') +
+          `. Tip: BM54/Nipro only show while BLE is on after a measurement.`;
         if (data.count > 0) {
           const tbody = document.querySelector('#scanTable tbody');
+          // Named medical-looking devices first (already sorted server-side)
           tbody.innerHTML = data.devices.map(d => {
             const mac = d.mac || d.address || '';
             const rssi = (d.rssi === null || d.rssi === undefined) ? '—' : `${d.rssi} dBm`;
-            const name = (d.name || '-').replace(/</g, '&lt;');
+            const rawName = d.name || '';
+            const name = escHtml(rawName || '-');
+            const macJs = mac.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const nameJs = rawName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const isMed = !!(d.medical) || !!guessBrandFromName(rawName);
             return `
-            <tr>
-              <td style="font-family:monospace">${mac}</td>
-              <td>${name}</td>
+            <tr style="${isMed ? 'background: rgba(62,207,142,0.08);' : ''}">
+              <td style="font-family:monospace">${escHtml(mac)}</td>
+              <td>${name}${isMed ? ' <span style="color:var(--ok);font-size:0.75rem">medical</span>' : ''}</td>
               <td>${rssi}</td>
-              <td><button class="secondary" onclick="selectForPair('${mac}')">Select</button></td>
+              <td><button class="secondary" onclick="selectForPair('${macJs}', '${nameJs}')">Select</button></td>
             </tr>`;
           }).join('');
           document.getElementById('scanResults').classList.remove('hidden');
+          // Auto-scroll / focus first medical hit
+          const firstMed = (data.devices || []).find(x => x.medical || guessBrandFromName(x.name || ''));
+          if (firstMed) {
+            st.innerText += ` · Top medical: ${firstMed.name || firstMed.mac}`;
+          }
+        } else {
+          st.innerText += ' No hits — wake the meter (measure or BT button) and Scan again.';
         }
       } catch (e) {
         st.innerText = e.message;
@@ -552,25 +689,62 @@
       }
     }
 
-    function selectForPair(mac) {
-      document.getElementById('pairMac').value = mac;
+    function selectForPair(mac, name) {
+      document.getElementById('pairMac').value = mac || '';
+      document.getElementById('pairName').value = name || '';
       document.getElementById('pairForm').classList.remove('hidden');
       document.getElementById('pairLog').classList.add('hidden');
+      const guessed = guessBrandFromName(name);
+      if (guessed) {
+        const sel = document.getElementById('pairBrand');
+        if ([...sel.options].some(o => o.value === guessed)) {
+          sel.value = guessed;
+          document.getElementById('pairModel').dataset.fromBrand = '1';
+          onPairBrandChange();
+        }
+      }
+      // Prefer advertised name as model hint when it looks like a SKU (BM54, GL50…)
+      if (name && /^(BM|BC|GL|FT|PO|BF|ME|AS)\w*/i.test(name.trim())) {
+        document.getElementById('pairModel').value = name.trim().split(/\s+/)[0];
+        document.getElementById('pairModel').dataset.fromBrand = '0';
+      }
     }
 
     async function executePair() {
       const mac = document.getElementById('pairMac').value;
       const brand = document.getElementById('pairBrand').value;
+      const model = document.getElementById('pairModel').value.trim();
+      const name = document.getElementById('pairName').value.trim();
+      const passkey = (document.getElementById('pairPasskey').value || '').trim();
       const logBox = document.getElementById('pairLog');
+      const hint = document.getElementById('passkeyHint');
       
       logBox.classList.remove('hidden');
-      logBox.innerText = `Pairing ${brand} at ${mac}...\n(Make sure device is awake and in range)`;
+      logBox.innerText = `Pairing ${brand}${model ? ' (' + model + ')' : ''} at ${mac}...\n` +
+        (passkey ? `Using passkey ${passkey.replace(/\d(?=\d{0,2}$)/g, '•')}…\n` : '') +
+        `(Wake cuff / take a reading. If a 6-digit code appears on the LCD, type it in Passkey and click Send passkey.)`;
       
+      // Poll for mid-pair passkey request while fetch is in flight
+      let pollTimer = setInterval(async () => {
+        try {
+          const st = await (await fetch('/pair/passkey')).json();
+          if (st.need_passkey) {
+            if (hint) hint.classList.remove('hidden');
+            logBox.innerText += `\n⏳ Cuff wants passkey — enter 6 digits from LCD, then Send passkey.`;
+            // Auto-submit if field already filled
+            const pk = (document.getElementById('pairPasskey').value || '').trim();
+            if (pk.replace(/\D/g, '').length >= 4) {
+              await sendPasskeyNow();
+            }
+          }
+        } catch (_) {}
+      }, 800);
+
       try {
         const res = await fetch('/pair', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ mac, brand, repair: true })
+          body: JSON.stringify({ mac, brand, model, name, repair: true, passkey })
         });
         const data = await res.json();
         if (!res.ok) {
@@ -581,9 +755,19 @@
         }
         
         logBox.innerText += `\nSuccess! Bonded and registered. Daemon will now auto-collect.`;
+        if (data.next_steps && data.next_steps.length) {
+          logBox.innerText += '\n\nNext:\n- ' + data.next_steps.join('\n- ');
+        }
+        if (hint) hint.classList.add('hidden');
         updateHealth();
       } catch (e) {
         logBox.innerText += `\nError: ${e.message}`;
+        if (/passkey|auth|bond/i.test(e.message || '')) {
+          logBox.innerText += `\nTip: Type the 6-digit code from the cuff into Passkey, then Pair again (or Send passkey if still waiting).`;
+          if (hint) hint.classList.remove('hidden');
+        }
+      } finally {
+        clearInterval(pollTimer);
       }
     }
 

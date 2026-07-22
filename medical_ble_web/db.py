@@ -207,11 +207,16 @@ def upsert_device(
         return dict(row) if row else {}
 
 
-def list_devices() -> List[Dict[str, Any]]:
+def list_devices(*, paired_only: bool = False) -> List[Dict[str, Any]]:
     with connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM devices ORDER BY updated_at DESC"
-        ).fetchall()
+        if paired_only:
+            rows = conn.execute(
+                "SELECT * FROM devices WHERE paired = 1 ORDER BY updated_at DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM devices ORDER BY updated_at DESC"
+            ).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -222,6 +227,16 @@ def get_device_by_mac(mac: str) -> Optional[Dict[str, Any]]:
             ((mac or "").strip().upper(),),
         ).fetchone()
         return dict(row) if row else None
+
+
+def delete_device(mac: str) -> bool:
+    """Remove a device row by MAC. Returns True if a row was deleted."""
+    mac_u = (mac or "").strip().upper()
+    if not mac_u:
+        return False
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM devices WHERE mac = ?", (mac_u,))
+        return cur.rowcount > 0
 
 
 def start_session(
@@ -464,11 +479,12 @@ def latest_reading_for_device(device_id: int) -> Optional[Dict[str, Any]]:
 
 def dashboard_board(macs: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
-    One card per saved device: identity + latest clinical reading.
+    One card per *paired* device: identity + latest clinical reading.
 
-    Optionally filter to a MAC allow-list (cycle roster).
+    Failed pair attempts leave unpaired stubs — those are hidden so the
+    dashboard only shows hub-owned bonds. Optionally filter to a MAC allow-list.
     """
-    devices = list_devices()
+    devices = list_devices(paired_only=True)
     if macs:
         want = {m.strip().upper() for m in macs if m}
         devices = [d for d in devices if (d.get("mac") or "").upper() in want]

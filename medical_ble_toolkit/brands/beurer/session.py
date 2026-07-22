@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 if TYPE_CHECKING:
     from medical_ble_toolkit.profiles import DeviceProfile
@@ -55,7 +56,23 @@ log = logging.getLogger("medical_ble.beurer.session")
 
 
 def _ble_device(address: str, name: str = "Beurer") -> BLEDevice:
+    """Windows-only helper: WinRT accepts BLEDevice without BlueZ path details."""
     return BLEDevice(address.strip().upper(), name, None)
+
+
+def _connect_target(address: str, name: str = "Beurer") -> Union[BLEDevice, str]:
+    """
+    Platform-correct BleakClient target.
+
+    Linux BlueZ: BleakClient(BLEDevice(..., details=None)) crashes with
+    TypeError: 'NoneType' object is not subscriptable (details["path"]).
+    Pass the MAC string so BlueZ can resolve via find_device_by_address.
+    Windows: BLEDevice(mac) → FromBluetoothAddressAsync (no scan).
+    """
+    mac = address.strip().upper()
+    if sys.platform == "win32":
+        return _ble_device(mac, name=name)
+    return mac
 
 
 def _is_connection_lost(exc: BaseException) -> bool:
@@ -110,9 +127,12 @@ class BeurerCompanionSession:
         connect_retries: int = 3,
         mfg_data: Optional[dict] = None,
         force_full_glucose_history: bool = False,
+        passkey: Optional[int] = None,
     ):
         self.address = address.strip().upper()
         self.device_meta: Optional[BeurerDevice] = get_device(model_id)
+        # 6-digit code from cuff LCD (Beurer passkey models); None = wait for UI
+        self.passkey = passkey
         self.model_id = (
             self.device_meta.id if self.device_meta else (model_id or "BM54").upper()
         )
@@ -281,13 +301,15 @@ class BeurerCompanionSession:
 
     async def connect(self) -> None:
         last: Optional[BaseException] = None
-        target = _ble_device(self.address, name=self.model_id)
+        target = _connect_target(self.address, name=self.model_id)
+        via = "BLEDevice" if isinstance(target, BLEDevice) else "MAC string (BlueZ)"
         for attempt in range(1, self.connect_retries + 1):
             log.info(
-                "[CONNECT] Beurer %s attempt %d/%d …",
+                "[CONNECT] Beurer %s attempt %d/%d via %s …",
                 self.model_id,
                 attempt,
                 self.connect_retries,
+                via,
             )
             client = BleakClient(
                 target,
@@ -307,9 +329,14 @@ class BeurerCompanionSession:
                 if _is_auth_error(exc):
                     self._auth_error = True
                 lost = _is_connection_lost(exc)
+                not_found = "not found" in str(exc).lower() or type(exc).__name__ in (
+                    "BleakDeviceNotFoundError",
+                )
                 log.warning(
                     "[CONNECT] failed%s: %s: %s",
-                    " (connection lost — retry)" if lost else "",
+                    " (connection lost — retry)" if lost else (
+                        " (not advertising)" if not_found else ""
+                    ),
                     type(exc).__name__,
                     exc,
                 )
@@ -317,10 +344,19 @@ class BeurerCompanionSession:
                     await client.disconnect()
                 except Exception:
                     pass
+                # Don't burn retries when cuff is simply off / not advertising
+                if not_found and attempt >= 1:
+                    # One short retry only, then fail fast so UI can re-scan
+                    if attempt >= self.connect_retries:
+                        break
+                    await asyncio.sleep(0.8)
+                    continue
                 # App retries ConnectionLostException
                 delay = self.timing.connect_retry_s * attempt
                 if lost:
-                    delay = max(delay, 2.0)
+                    delay = max(delay, 1.5)
+                else:
+                    delay = min(delay, 2.0)
                 await asyncio.sleep(delay)
         raise last or ConnectionError("Beurer connect failed")
 
@@ -334,12 +370,19 @@ class BeurerCompanionSession:
         self._paired_attempt = True
         log.info("[PAIR] OS bond (companion pairing)…")
         if self.passkey_hint:
-            log.info("[PAIR] Expect passkey UI for this model/generation.")
+            log.info(
+                "[PAIR] Passkey model — enter 6-digit code from cuff LCD in the hub UI "
+                "(or pass passkey=). Agent waits up to 90s."
+            )
         try:
-            try:
-                await self._client.pair(protection_level=2)
-            except TypeError:
-                await self._client.pair()
+            # Use shared BlueZ agent path (Just Works or KeyboardDisplay+passkey)
+            from medical_ble_toolkit.brands.omron.ble.connection import pair_client
+
+            await pair_client(
+                self._client,
+                passkey=self.passkey,
+                use_passkey_agent=bool(self.passkey_hint or self.passkey is not None),
+            )
             log.info("[PAIR] OK")
             # Bond-wait settle (GATT_AUTH recovery window)
             await asyncio.sleep(max(self.timing.post_pair_settle_s, 0.8))
@@ -353,6 +396,12 @@ class BeurerCompanionSession:
                 log.warning("[PAIR] auth/bond issue: %s", exc)
             else:
                 log.warning("[PAIR] %s — continuing if link still up", exc)
+            await asyncio.sleep(self.timing.post_pair_settle_s)
+        except Exception as exc:  # noqa: BLE001
+            self._last_error = exc
+            if _is_auth_error(exc):
+                self._auth_error = True
+            log.warning("[PAIR] %s: %s", type(exc).__name__, exc)
             await asyncio.sleep(self.timing.post_pair_settle_s)
 
     async def _settle(self) -> None:

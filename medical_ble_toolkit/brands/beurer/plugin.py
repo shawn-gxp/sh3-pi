@@ -24,9 +24,29 @@ class BeurerPlugin(DevicePlugin):
     device_class = DeviceClass.WINDOWED
     priority_rank = 20
 
-    async def pair(self, mac: str, model: str, *, force_rebind: bool = False) -> PairResult:
+    async def pair(
+        self,
+        mac: str,
+        model: str,
+        *,
+        force_rebind: bool = False,
+        passkey: int | None = None,
+        **kwargs: Any,
+    ) -> PairResult:
         from medical_ble_toolkit.brands.beurer.session import BeurerCompanionSession
-        sess = BeurerCompanionSession(mac, model_id=model or "BM54", pair=True)
+        # Fast pair path: short connect budget (device must be advertising)
+        # passkey = 6-digit code from cuff LCD (Beurer BM54 etc.)
+        pk = passkey if passkey is not None else kwargs.get("passkey")
+        if isinstance(pk, str) and pk.strip():
+            pk = int("".join(c for c in pk if c.isdigit()) or "0") or None
+        sess = BeurerCompanionSession(
+            mac,
+            model_id=model or "BM54",
+            pair=True,
+            connect_timeout=15.0,
+            connect_retries=2,
+            passkey=pk if isinstance(pk, int) else None,
+        )
         result = await sess.run()
         if not result.ok:
             raise RuntimeError(result.message or result.status.value)
@@ -34,7 +54,20 @@ class BeurerPlugin(DevicePlugin):
 
     async def run_session(self, mac: str, model: str, **kwargs: Any) -> SessionResult:
         from medical_ble_toolkit.brands.beurer.session import BeurerCompanionSession
-        sess = BeurerCompanionSession(mac, model_id=model or "BM54", pair=True)
+        find_timeout = float(kwargs.get("find_timeout") or 0.0)
+        # Hub already saw AD → quick connect; UI pair uses defaults above
+        connect_timeout = 12.0 if find_timeout <= 0 else 20.0
+        pk = kwargs.get("passkey")
+        if isinstance(pk, str) and pk.strip():
+            pk = int("".join(c for c in pk if c.isdigit()) or "0") or None
+        sess = BeurerCompanionSession(
+            mac,
+            model_id=model or "BM54",
+            pair=True,
+            connect_timeout=connect_timeout,
+            connect_retries=2,
+            passkey=pk if isinstance(pk, int) else None,
+        )
         result = await sess.run()
         if not result.ok and not result.readings:
             raise RuntimeError(result.message or str(result.status))

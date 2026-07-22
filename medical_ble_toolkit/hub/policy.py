@@ -23,6 +23,7 @@ TIER1_BRANDS: FrozenSet[str] = frozenset(
         "nipro_nt100b",
         "thermo",  # alias → NT-100B
         "masimo",
+        "beurer",  # BM/BC BP, GL*, FT*, PO60 (windowed companion)
     }
 )
 
@@ -33,12 +34,24 @@ NAME_HINTS = {
     "nipro_nt100b": ("nt-100b", "nt-100"),
     "thermo": ("nt-100b", "nt-100"),
     "masimo": ("mightysat", "masimo"),
+    "beurer": (
+        "beurer",
+        "bm54",
+        "bm",
+        "bc",
+        "gl50",
+        "gl",
+        "ft95",
+        "ft",
+        "po60",
+    ),
 }
 
 # Manufacturer company IDs in AD
 COMPANY_IDS = {
     "omron": (0x020E,),
     "masimo": (0x0243,),
+    "beurer": (0x0611,),  # Beurer GmbH
 }
 
 
@@ -54,7 +67,14 @@ def classify_brand(brand_id: str) -> DeviceClass:
         return DeviceClass.STREAM
     if b == "omron":
         return DeviceClass.ALWAYS
-    if b in ("nipro_nbp", "nipro_nt100b", "thermo", "nipro_nmbp", "nipro_nsm1"):
+    if b in (
+        "nipro_nbp",
+        "nipro_nt100b",
+        "thermo",
+        "nipro_nmbp",
+        "nipro_nsm1",
+        "beurer",
+    ):
         return DeviceClass.WINDOWED
     return DeviceClass.WINDOWED
 
@@ -79,6 +99,7 @@ def priority_rank(brand_id: str) -> int:
         "nipro_nbp": 1,
         "nipro_nt100b": 2,
         "thermo": 2,
+        "beurer": 3,  # windowed companion after measure
         "omron": 10,
     }
     return order.get(b, 50)
@@ -105,6 +126,6 @@ def brand_matches_adv(
 
 HUB_ONLY_PAIR_TIPS = [
     "Pair ONLY with this hub — unpair the phone companion first.",
-    "One host bond only (Omron / Nipro / MightySat).",
+    "One host bond only (Omron / Nipro / Beurer / MightySat).",
     "After Pair: leave Auto-sync ON; measure on the device; hub captures automatically.",
 ]

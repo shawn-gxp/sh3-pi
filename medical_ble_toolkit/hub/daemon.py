@@ -161,8 +161,25 @@ class HubDaemon:
         for t in list(self._workers.values()):
             t.cancel()
 
-    def request_manual_pause(self) -> None:
+    def request_manual_pause(self, *, cancel_workers: bool = True) -> None:
+        """
+        Yield radio to UI Scan/Pair.
+
+        cancel_workers=True (default): cancel in-flight hub sessions so the
+        radio frees within seconds instead of waiting out Omron/Mighty dumps.
+        """
         self._manual_pause.set()
+        n = 0
+        if cancel_workers:
+            for mac, t in list(self._workers.items()):
+                if not t.done():
+                    t.cancel()
+                    n += 1
+            if n:
+                log.info(
+                    "[HUB] manual pause — cancelled %d worker(s) for Scan/Pair",
+                    n,
+                )
         log.info("[HUB] manual pause requested (Scan/Pair)")
 
     def clear_manual_pause(self) -> None:

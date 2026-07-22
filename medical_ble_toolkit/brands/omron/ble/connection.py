@@ -231,7 +231,12 @@ async def _pair_strategies(client: BleakClient) -> None:
     raise last_err
 
 
-async def pair_client(client: BleakClient) -> None:
+async def pair_client(
+    client: BleakClient,
+    *,
+    passkey: Optional[int] = None,
+    use_passkey_agent: bool = False,
+) -> None:
     """
     OS-level pair/bond after connect.
 
@@ -239,9 +244,11 @@ async def pair_client(client: BleakClient) -> None:
       - protection_level=2 (auth+encrypt) often FAILS on Just-Works Omron
       - try level 2 → plain pair() → level 1
     Linux BlueZ:
-      - Requires a pair *agent* (Just Works). Without one, Pair returns
+      - Requires a pair *agent*. Without one, Pair returns
         AuthenticationFailed / AuthenticationCanceled.
-      - We register a temporary NoInputNoOutput agent around pair().
+      - Just Works (default): NoInputNoOutput agent
+      - Passkey devices (Beurer BM54): KeyboardDisplay agent + passkey /
+        PasskeyBroker (UI can supply 6-digit code from cuff LCD)
     """
     if not client.is_connected:
         raise ConnectionError("Cannot pair: not connected")
@@ -249,16 +256,31 @@ async def pair_client(client: BleakClient) -> None:
     addr = getattr(client, "address", "") or ""
 
     if _IS_LINUX:
-        from medical_ble_toolkit.brands.omron.ble.bluez_agent import bluez_pair_agent, ensure_bluez_trusted
+        from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
+            GLOBAL_PASSKEY_BROKER,
+            bluez_pair_agent,
+            ensure_adapter_pairable,
+            ensure_bluez_trusted,
+        )
 
+        await ensure_adapter_pairable()
         await ensure_bluez_trusted(addr)
-        async with bluez_pair_agent() as agent_ok:
+        pk_mode = use_passkey_agent or passkey is not None
+        broker = GLOBAL_PASSKEY_BROKER if pk_mode else None
+        async with bluez_pair_agent(passkey=passkey, broker=broker) as agent_ok:
             if agent_ok:
-                logger.info("Pairing with BlueZ Just-Works agent active…")
+                if pk_mode:
+                    logger.info(
+                        "Pairing with BlueZ KeyboardDisplay agent "
+                        "(passkey %s)…",
+                        "pre-set" if passkey is not None else "await UI",
+                    )
+                else:
+                    logger.info("Pairing with BlueZ Just-Works agent active…")
             else:
                 logger.warning(
                     "No BlueZ agent — pair may fail with AuthenticationFailed. "
-                    "Ensure cuff is flashing P; or run: bluetoothctl → agent NoInputNoOutput"
+                    "Run: bluetoothctl → agent KeyboardDisplay → default-agent"
                 )
             await _pair_strategies(client)
         return

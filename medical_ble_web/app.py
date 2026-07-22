@@ -38,6 +38,8 @@ from ble_jobs import (  # noqa: E402
     job_daemon_stop,
     job_pair,
     job_scan,
+    pair_passkey_status,
+    provide_pair_passkey,
     subscribe_live,
     unsubscribe_live,
 )
@@ -120,6 +122,12 @@ class PairBody(BaseModel):
     model: str = ""
     name: str = ""
     repair: bool = False
+    # Beurer BM54 etc. — 6-digit code from cuff LCD
+    passkey: str = ""
+
+
+class PasskeyBody(BaseModel):
+    passkey: str
 
 
 class PatientSetting(BaseModel):
@@ -211,7 +219,7 @@ async def admin_reset() -> Dict[str, Any]:
 async def brands(
     all: bool = Query(False, description="Include advanced/non Tier-1 brands"),
 ) -> Dict[str, Any]:
-    """Tier-1 hub brands only by default (Omron, Nipro NBP/NT, Masimo MightySat)."""
+    """Tier-1 hub brands by default (Omron, Nipro, Masimo, Beurer). ?all=true for lab brands."""
     return {
         "brands": list_brands(include_advanced=bool(all)),
         "tier1_only": not bool(all),
@@ -275,6 +283,7 @@ async def pair(body: PairBody) -> Dict[str, Any]:
             model=body.model,
             name=body.name,
             repair=body.repair,
+            passkey=body.passkey,
         )
         return result
     except BleJobError as exc:
@@ -282,6 +291,21 @@ async def pair(body: PairBody) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         log.exception("pair failed")
         raise HTTPException(500, str(exc)) from exc
+
+
+@app.get("/pair/passkey")
+async def pair_passkey_get() -> Dict[str, Any]:
+    """Poll while Pair is in flight — need_passkey=true when cuff shows a code."""
+    return pair_passkey_status()
+
+
+@app.post("/pair/passkey")
+async def pair_passkey_post(body: PasskeyBody) -> Dict[str, Any]:
+    """Submit 6-digit code from cuff LCD to the BlueZ agent (mid-pair)."""
+    try:
+        return provide_pair_passkey(body.passkey)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/daemon/status")
