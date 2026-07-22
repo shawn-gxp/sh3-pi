@@ -558,6 +558,7 @@ async def job_pair(
                 log.debug("passkey broker reset: %s", exc)
 
         # Pause hub hunt so BlueZ is free for OS pair / GATT
+        beurer_pair = None
         async with _pause_hub_for_manual("repair" if repair else "pair"):
             if brand_info.get("is_omron"):
                 # Side-effect import registers OmronPlugin (see brands/__init__.py)
@@ -574,12 +575,15 @@ async def job_pair(
                 import medical_ble_toolkit.brands  # noqa: F401
                 from medical_ble_toolkit.core.registry import get_plugin
 
-                res = await get_plugin("beurer").pair(
+                # Lab path (tools_bm54_pair_check.py): agent first → connect →
+                # settle → CCCD (live LCD passkey mid-SMP) → BLP dump.
+                beurer_pair = await get_plugin("beurer").pair(
                     mac_u, model, force_rebind=repair, passkey=pk
                 )
-                if hasattr(res, "ok") and not res.ok:
+                if hasattr(beurer_pair, "ok") and not beurer_pair.ok:
                     raise BleJobError(
-                        getattr(res, "error", "") or f"Beurer pair failed for {mac_u}",
+                        getattr(beurer_pair, "error", "")
+                        or f"Beurer pair failed for {mac_u}",
                         code="PAIR_FAILED",
                     )
             else:
@@ -590,7 +594,8 @@ async def job_pair(
                     model=model,
                     force_rebind=repair,
                 )
-        db.upsert_device(
+
+        device = db.upsert_device(
             profile_id=profile_id,
             brand=brand_info.get("company", ""),
             mac=mac_u,
@@ -598,6 +603,38 @@ async def job_pair(
             name=adv_name or model,
             paired=True,
         )
+        device_id = device.get("id")
+
+        # Persist history dump that often arrives during first BM54 pair
+        stored = 0
+        if beurer_pair is not None and device_id is not None:
+            readings = (beurer_pair.detail or {}).get("readings") or []
+            for r in readings:
+                row = _reading_to_row(r, profile_id)
+                if row["reading_type"] == "waveform":
+                    continue
+                if not (_is_clinical(row) or row.get("payload")):
+                    continue
+                rid = db.insert_reading(
+                    device_id=device_id,
+                    session_id=sid,
+                    brand=profile_id,
+                    reading_type=row["reading_type"],
+                    measured_at=row.get("measured_at"),
+                    systolic=row.get("systolic"),
+                    diastolic=row.get("diastolic"),
+                    pulse_rate=row.get("pulse_rate"),
+                    spo2=row.get("spo2"),
+                    perfusion_index=row.get("perfusion_index"),
+                    temperature=row.get("temperature"),
+                    glucose_mg_dl=row.get("glucose_mg_dl"),
+                    payload=row.get("payload"),
+                    raw_hex=row.get("raw_hex") or "",
+                    dedupe=_is_clinical(row),
+                )
+                if rid is not None and _is_clinical(row):
+                    stored += 1
+
         # Nipro companion registry (exact name + CheckPairing id)
         if brand_info.get("is_nipro") or profile_id.startswith("nipro") or profile_id == "mightysat":
             try:
@@ -624,7 +661,13 @@ async def job_pair(
             "brand": brand_id,
             "profile": profile_id,
             "session_id": sid,
+            "stored": stored,
         }
+        if beurer_pair is not None:
+            out["reading_count"] = int(
+                (beurer_pair.detail or {}).get("reading_count") or 0
+            )
+            out["status"] = (beurer_pair.detail or {}).get("status") or ""
         # Hub-only bond policy (dedicated Pi collector)
         hub_tips = [
             "Pair ONLY with this hub — unpair any phone companion first.",
@@ -648,13 +691,19 @@ async def job_pair(
             ]
         elif brand_info.get("is_beurer") or profile_id.startswith("beurer"):
             out["next_steps"] = hub_tips + [
-                "Beurer: unpair phone Beurer app first (one bond).",
-                "If the cuff shows a 6-digit code: type it in Passkey before/during Pair.",
-                "Measure on the device — hub connects on advertisement and dumps history.",
+                "Beurer: unpair phone HealthManager app first (one bond only).",
+                "Passkey is NOT known ahead of time — when the cuff LCD shows "
+                "6 digits during Pair, type them and click Send passkey.",
+                "After bond, measure on the device; hub dumps history on AD "
+                "(no passkey on later syncs).",
             ]
+            if stored:
+                out["next_steps"] = [
+                    f"Stored {stored} reading(s) from this pair session."
+                ] + list(out["next_steps"])
         else:
             out["next_steps"] = hub_tips
-            
+
         # Hands-free: start auto-sync so the next measurement is pulled
         # without UI Sync (device must advertise / stay connectable).
         try:

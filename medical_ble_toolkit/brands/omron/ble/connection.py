@@ -236,6 +236,7 @@ async def pair_client(
     *,
     passkey: Optional[int] = None,
     use_passkey_agent: bool = False,
+    register_agent: bool = True,
 ) -> None:
     """
     OS-level pair/bond after connect.
@@ -249,6 +250,9 @@ async def pair_client(
       - Just Works (default): NoInputNoOutput agent
       - Passkey devices (Beurer BM54): KeyboardDisplay agent + passkey /
         PasskeyBroker (UI can supply 6-digit code from cuff LCD)
+      - register_agent=False: caller already holds bluez_pair_agent (Beurer
+        session). Nested agents at the same path race and cause
+        "No agent available for request type 1" / pair timeout on Pi.
     """
     if not client.is_connected:
         raise ConnectionError("Cannot pair: not connected")
@@ -266,6 +270,21 @@ async def pair_client(
         await ensure_adapter_pairable()
         await ensure_bluez_trusted(addr)
         pk_mode = use_passkey_agent or passkey is not None
+
+        # Outer Beurer session already registered KeyboardDisplay agent —
+        # only run pair strategies so we do not unregister it mid-SMP.
+        if not register_agent:
+            if pk_mode:
+                logger.info(
+                    "Pairing with pre-registered BlueZ agent "
+                    "(passkey %s)…",
+                    "pre-set" if passkey is not None else "await UI",
+                )
+            else:
+                logger.info("Pairing with pre-registered BlueZ agent…")
+            await _pair_strategies(client)
+            return
+
         broker = GLOBAL_PASSKEY_BROKER if pk_mode else None
         async with bluez_pair_agent(passkey=passkey, broker=broker) as agent_ok:
             if agent_ok:

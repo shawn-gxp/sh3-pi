@@ -379,44 +379,51 @@ class BeurerCompanionSession:
 
     async def _ensure_agent_running(self) -> None:
         """
-        On Linux passkey models: register the BlueZ KeyboardDisplay agent BEFORE
-        touching any GATT characteristics so BlueZ can respond to the SMP
-        initiated by the device after the CCCD refusal.
+        Linux passkey models: keep adapter pairable and seed PasskeyBroker.
+
+        The KeyboardDisplay agent itself is held by run()'s outer
+        bluez_pair_agent context (do not register a second agent here).
         """
         if not self.pair or not self._client:
             return
         if not self.passkey_hint:
-            return  # Just-Works devices don't need early agent
-        import sys
-        if sys.platform != "linux":
-            return  # Windows handles this via WinRT auto-dialog
-        
+            return
+        if not sys.platform.startswith("linux"):
+            return
+
         try:
             from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
                 GLOBAL_PASSKEY_BROKER,
                 ensure_adapter_pairable,
             )
+
             await ensure_adapter_pairable()
-            GLOBAL_PASSKEY_BROKER.reset(preset=self.passkey)
-            log.info("[PAIR] Agent pre-registered for passkey model %s", self.model_id)
+            # Only set preset when we have one; never clear a UI-provided key.
+            if self.passkey is not None:
+                GLOBAL_PASSKEY_BROKER.reset(preset=self.passkey)
+            log.info(
+                "[PAIR] Passkey broker ready for %s (LCD code appears after SMP)",
+                self.model_id,
+            )
         except Exception as exc:
             log.debug("ensure_agent_running: %s", exc)
 
     async def _complete_bond(self) -> None:
         """
         Wait for BlueZ to complete the SMP exchange that the device initiated.
-        The agent (registered in _ensure_agent_running) handles RequestPasskey.
+        The agent (registered at start of run() on Linux passkey models) handles
+        RequestPasskey — do not nest a second agent (Pi: agent race / timeout).
         """
         self._paired_attempt = True
         log.info("[PAIR] Waiting for SMP to complete (passkey from LCD)…")
         try:
             from medical_ble_toolkit.brands.omron.ble.connection import pair_client
-            # pair() call tells BlueZ to complete the SMP exchange
-            # The agent is already registered at the start of run()
+            # Agent already held by run()'s bluez_pair_agent context on Linux
             await pair_client(
                 self._client,
                 passkey=self.passkey,
                 use_passkey_agent=bool(self.passkey_hint),
+                register_agent=not (sys.platform.startswith("linux") and self.passkey_hint),
             )
             log.info("[PAIR] SMP bond complete")
             # Give BlueZ time to apply new keys before GATT retry
@@ -456,13 +463,15 @@ class BeurerCompanionSession:
                     "(or pass passkey=). Agent waits up to 90s."
                 )
         try:
-            # Use shared BlueZ agent path (Just Works or KeyboardDisplay+passkey)
+            # Shared BlueZ agent path. On Linux passkey models the outer run()
+            # context already registered KeyboardDisplay — skip nested agent.
             from medical_ble_toolkit.brands.omron.ble.connection import pair_client
 
             await pair_client(
                 self._client,
                 passkey=self.passkey,
                 use_passkey_agent=bool(self.passkey_hint or self.passkey is not None),
+                register_agent=not (sys.platform.startswith("linux") and self.passkey_hint),
             )
             log.info("[PAIR] OK")
             # Bond-wait settle (GATT_AUTH recovery window)
@@ -749,48 +758,86 @@ class BeurerCompanionSession:
         import sys
         from contextlib import asynccontextmanager
 
+        # Lab-proven (tools_bm54_pair_check.py): one KeyboardDisplay agent for
+        # the whole session — connect → settle → CCCD (SMP/passkey mid-CCCD) →
+        # dump. Nested pair_client agents race ("No agent available") on Pi.
         @asynccontextmanager
         async def _maybe_agent():
-            if self.pair and self.passkey_hint and sys.platform == "linux":
+            if self.pair and self.passkey_hint and sys.platform.startswith("linux"):
                 from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
                     GLOBAL_PASSKEY_BROKER,
                     bluez_pair_agent,
+                    ensure_adapter_pairable,
+                )
+
+                await ensure_adapter_pairable()
+                # Do not wipe a passkey the hub UI already POSTed mid-flight.
+                st = GLOBAL_PASSKEY_BROKER.status()
+                if self.passkey is not None:
+                    GLOBAL_PASSKEY_BROKER.reset(preset=self.passkey)
+                elif not st.get("has_passkey") and not st.get("waiting"):
+                    GLOBAL_PASSKEY_BROKER.reset(preset=None)
+                log.info(
+                    "[PAIR] Holding BlueZ KeyboardDisplay agent "
+                    "(passkey from cuff LCD when SMP starts — not known ahead)"
                 )
                 async with bluez_pair_agent(
-                    passkey=self.passkey, broker=GLOBAL_PASSKEY_BROKER
+                    passkey=self.passkey if self.passkey is not None else None,
+                    broker=GLOBAL_PASSKEY_BROKER,
+                    wait_timeout_s=90.0,
                 ):
                     yield
             else:
                 yield
-                
+
         try:
             async with _maybe_agent():
                 await self.connect()
                 await self._settle()
-                
-                # For passkey models: setup adapter BEFORE GATT probe
+
+                # Refresh broker preset if session was given a late passkey=
                 await self._ensure_agent_running()
-                
+
                 # Read DIS before subscribe if not protected
                 await self._read_dis()
-                
-                # --- GATT probe → triggers device SMP ---
+
+                # --- GATT Indicate enable → often triggers SMP (BM54 lab path) ---
+                # BlueZ RequestPasskey runs while start_notify is in flight;
+                # agent returns 6-digit code from PasskeyBroker (UI or preset).
+                # CCCD may return OK with no separate pair() call.
                 try:
                     await self._subscribe(raise_on_insufficient_auth=self.passkey_hint)
+                    if self.pair and self.passkey_hint and not self._paired_attempt:
+                        self._paired_attempt = True
+                        log.info(
+                            "[PAIR] CCCD OK — bond may have completed during "
+                            "Indicate enable (passkey path, no explicit pair())"
+                        )
                 except Exception as probe_exc:
                     if _is_insufficient_auth(probe_exc) and self.pair:
-                        # Device replied 0x05 → SMP starts, passkey shown on LCD
-                        log.info("[PAIR] GATT 0x05 probe confirmed — completing bond")
+                        log.info(
+                            "[PAIR] GATT 0x05 — completing bond then CCCD retry"
+                        )
                         await self._complete_bond()
                         await self._set_time_if_needed()
                         await self._subscribe()
                     elif self.pair and not self._paired_attempt:
-                        # Fallback: explicit pair for non-passkey models
                         await self._pair_if_needed()
                         await self._set_time_if_needed()
                         await self._subscribe()
                     else:
                         raise
+
+                # Trusted=true so later hub reconnects skip agent friction
+                if self.pair and sys.platform.startswith("linux"):
+                    try:
+                        from medical_ble_toolkit.brands.omron.ble.bluez_agent import (
+                            ensure_bluez_trusted,
+                        )
+
+                        await ensure_bluez_trusted(self.address)
+                    except Exception as exc:  # noqa: BLE001
+                        log.debug("ensure_bluez_trusted: %s", exc)
 
                 await self._set_time_if_needed()
                 await self._post_subscribe_commands()

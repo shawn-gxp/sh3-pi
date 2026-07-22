@@ -99,8 +99,9 @@ TIER1_BRANDS: List[SupportedDevice] = [
         default_model="BM54",
         supports=["pair", "sync", "connect"],
         notes=(
-            "HUB ONLY bond. Pair once with cuff awake; hub dumps history on AD "
-            "(SIG BLP 0x1810). Default model BM54 — change if your SKU differs."
+            "HUB ONLY bond. Wake cuff (M1/M2 or after measure). Passkey appears "
+            "on LCD only after Pair starts — type 6 digits + Send passkey. "
+            "Later syncs need no passkey. SIG BLP 0x1810 dump. Default BM54."
         ),
     ),
     SupportedDevice(

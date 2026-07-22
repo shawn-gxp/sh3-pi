@@ -229,7 +229,13 @@ async def bluez_pair_agent(
     active_broker = broker
     if use_passkey_mode:
         active_broker = broker or GLOBAL_PASSKEY_BROKER
-        active_broker.reset(preset=passkey)
+        # Preserve a passkey already seeded by hub UI / job_pair; only reset
+        # when we have a new preset or the broker is idle empty.
+        st = active_broker.status()
+        if passkey is not None:
+            active_broker.reset(preset=passkey)
+        elif not st.get("has_passkey") and not st.get("waiting"):
+            active_broker.reset(preset=None)
     capability = CAPABILITY_PASSKEY if use_passkey_mode else CAPABILITY_JUST_WORKS
 
     if use_passkey_mode:
