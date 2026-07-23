@@ -39,26 +39,37 @@ python3 -m virtualenv .venv   # or: python3 -m venv .venv
 Or:
 
 ```bash
-chmod +x setup_linux.sh run_web.sh run_toolkit.sh
-./setup_linux.sh
+chmod +x scripts/deploy/setup_linux.sh scripts/dev/run_web.sh scripts/dev/run_toolkit.sh
+./scripts/deploy/setup_linux.sh
 ```
 
 ## Run — Web UI (recommended)
 
 ```bash
-./run_web.sh
+./scripts/dev/run_web.sh
 # Pi / LAN (default): bind 0.0.0.0 — phone on same WiFi:
 #   http://<pi-ip>:8741
 # Local only:
-#   HOST=127.0.0.1 ./run_web.sh
+#   HOST=127.0.0.1 ./scripts/dev/run_web.sh
 ```
 
 ### Pi appliance start (manual)
 
 ```bash
-./start_hub.sh
+./scripts/deploy/start_hub.sh
 # best-effort: WiFi radio + bluetooth power on → web hub on 0.0.0.0:8741
 ```
+
+## Pi Service Management & Deployment
+
+When installed as a persistent boot service (via `scripts/deploy/install_boot_service.sh`), the hub runs in the background using Linux `systemd`. 
+
+Use the following commands to manage the daemon:
+
+- **Check Status**: `sudo systemctl status medical-ble-hub`
+- **Restart the Service**: `sudo systemctl restart medical-ble-hub`
+- **View Live Logs**: `sudo journalctl -fu medical-ble-hub`
+- **Stop the Service**: `sudo systemctl stop medical-ble-hub`
 
 ### Start at boot (no login) — systemd
 

@@ -5,9 +5,9 @@ Tools for **finding, pairing, and reading** smart medical devices over
 
 | Platform | Docs | Launch |
 |----------|------|--------|
-| **Linux / Pi** | [LINUX.md](LINUX.md) | `scripts/deploy/setup_linux.sh` → `scripts/deploy/start_hub.sh` (or `scripts/dev/run_web.sh`) |
+| **Linux / Pi** | [docs/LINUX.md](docs/LINUX.md) | `scripts/deploy/setup_linux.sh` → `scripts/deploy/start_hub.sh` (or `scripts/dev/run_web.sh`) |
 | **Windows** | below | `scripts\dev\run_web.ps1` / `python -m medical_ble_toolkit` |
-| **Execution plan** | [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | Phased Pi hub production work |
+| **Execution plan** | [docs/EXECUTION_PLAN.md](docs/EXECUTION_PLAN.md) | Phased Pi hub production work |
 
 ## Active layout
 
@@ -16,6 +16,7 @@ Tools for **finding, pairing, and reading** smart medical devices over
 | `medical_ble_toolkit/` | **Standalone** multi-brand BLE HAL + hub + bundled Omron (`omron_bp/`) |
 | `medical_ble_web/` | FastAPI UI → http://127.0.0.1:8741 (depends **only** on toolkit) |
 | `datasheets/` | Protocol PDFs, architecture notes (reference only — not a runtime dep) |
+| `docs/` | Architecture guide (`PROJECT_AGENT_GUIDE.md`), workflow flowcharts, Pi manual |
 | `phoneblelog/` | Omron HCI findings + btsnoop helpers |
 | `tools/standalone/` | Optional continuous AD watch tools (`ble_discover_loop.py` etc) |
 
@@ -36,7 +37,7 @@ sudo ./scripts/deploy/install_boot_service.sh
 ```
 
 Hub Auto-sync: Pair devices on this host only → leave hub running → measure.
-MightySat uses a **duty-cycle** (valid SpO2 up to 20s, drop after 5s of `-`, then hunt NBP/NT/Omron). See `medical_ble_toolkit/hub_config.json` and [LINUX.md](LINUX.md).
+MightySat uses a **duty-cycle** (valid SpO2 up to 20s, drop after 5s of `-`, then hunt NBP/NT/Omron). See `medical_ble_toolkit/hub_config.json` and [docs/LINUX.md](docs/LINUX.md).
 
 ## Findings & datasheets (kept)
 
