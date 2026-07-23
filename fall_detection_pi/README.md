@@ -69,10 +69,17 @@ python app.py --ssl
 | Variable | Purpose |
 |----------|---------|
 | `FALL_DETECTION_HOME` | Absolute path to this package dir |
-| `FALL_PATIENT_ID` | Required for HTTP alerts (else skipped) |
-| `FALL_BACKEND_BASE_URL` | Alert API base |
+| `FALL_PATIENT_ID` | Required for **HTTP** alerts (else skipped) |
+| `FALL_BACKEND_BASE_URL` | Alert API base → `POST …/fall-events` |
+| `FALL_DEVICE_ID` | Payload device id (default `edge-ai-camera-01`) |
 | `FALL_POSE_MODEL` | `lite` / `full` / `heavy` |
 | `FALL_CAMERA_SOURCE` | OpenCV device index or use `RTSP_URL` |
 | `FALL_HUB_CONFIG` | Path to ROI `hub_config.json` |
+| `FALL_PORT` / `FALL_HOST` | HTTP listen (default `8742` / `0.0.0.0`) |
 
-See `sh3-pi/docs/FALL_DETECTION.md` for equations and thresholds.
+### Alerts: HTTP only (not MQTT)
+
+Clinical vitals use the BLE hub MQTT bridge (`health/readings`).  
+This package posts fall/bed-exit events via **HTTP** only (Android-compatible), not MQTT.
+
+See `docs/FALL_DETECTION.md` §10 for payload and cloud contract.

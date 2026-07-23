@@ -166,33 +166,86 @@ Without auto-login, the **hub server still runs headless**; the browser only ope
 sudo apt-get install -y chromium-browser   # if missing
 ```
 
-### MQTT cloud transfer (Android hub drop-in)
+### Two processes (BLE vs fall)
 
-Pi publishes clinical SQLite rows to MQTT like the SHHM Android hub.
+| Service | Port | How to run | Cloud path |
+|---------|------|------------|------------|
+| **BLE hub** | **8741** | `medical-ble-hub` systemd / `./start_hub.sh` | MQTT clinical readings |
+| **Fall detection** | **8742** | `python3 -m fall_detection_pi.web_server` (no unit yet) | HTTP `/fall-events` only |
 
-Config file: `medical_ble_web/mqtt_config.json`
+Unit name is **`medical-ble-hub`** (not `medical-ble-web`). Fall is **not** part of that unit.
 
-| Key | Default (edit these) |
-|-----|----------------------|
-| `broker` | `tcp://172.16.2.100:1883` (from APK assets) |
-| `username` / `password` | `admin` / `admin123` |
+See **`docs/FALL_DETECTION.md`** for fall math, ROI, and alert env vars.
+
+### MQTT cloud transfer (clinical vitals only)
+
+Pi publishes **clinical SQLite rows** to MQTT (Android hub drop-in).  
+**Fall events do not use this path** — see fall HTTP section in `FALL_DETECTION.md`.
+
+Config file: `medical_ble_web/mqtt_config.json`  
+(Requires restart of hub after edit: `sudo systemctl restart medical-ble-hub`.)
+
+| Key | Purpose |
+|-----|---------|
+| `broker` | e.g. `tcp://172.16.2.156:1883` |
+| `username` / `password` | Broker auth |
 | `topic` | `health/readings` |
 | `hub_id` | Must be cloud **`hubs.id` UUID** (slug like `pi-hub-sh3-01` is rejected by Postgres) |
-| `patient_id` | Cloud patient **UUID**, or leave unset so cloud resolves via hub/sensor |
-| `enabled` | `true` |
+| `patient_id` | Cloud patient **UUID** |
+| `enabled` | `true` / `false` |
+| `clinical_types` | Default `bp`, `temp`, `spo2`, `glucose` |
+
+**Lab / docker config (committed example — edit per site):**
+
+- `hub_id`: cloud hub UUID  
+- `patient_id`: cloud patient UUID  
+- `broker`: docker MQTT host on LAN  
+
+#### Behaviour
 
 - **sensorId** = device **MAC** (uppercase)
-- On each new clinical insert (`bp` / `temp` / `spo2` / `glucose`) → publish
-- Heartbeat every 30s → `hub/{hub_id}/heartbeat`
-- Also mirrors to `patient/{patient_id}/sensor/{mac}/data`
-- Local SQLite always kept; MQTT failures never block BLE
+- On each new clinical insert → publish to `health/readings` (+ mirror `patient/{id}/sensor/{mac}/data`)
+- Heartbeat every ~30s → `hub/{hub_id}/heartbeat`
+- Local SQLite always kept; MQTT failures **never** block BLE
+- Needs **`paho-mqtt`** in the hub venv (`pip install paho-mqtt`)
+- Status: `GET /health` → `mqtt` object (`enabled`, `connected`, `hub_id`, `broker`, …)
 
-**Known issues (cloud ingest):** Pi currently may send non-UUID `hubId` / `patientId`; SHHM backend does `Hub.findByPk` on UUID column → readings arrive on MQTT but fail to save. Full write-up and local-only fix plan: **`EXECUTION_PLAN.md` § 20 Known Issues** (`KI-MQTT-01`, `KI-MQTT-02`). Do not change cloud code for this.
+#### Outbox (offline broker)
+
+If publish fails while disconnected, payload is stored in SQLite table **`mqtt_outbox`**.  
+On MQTT reconnect, the bridge drains up to **20** oldest rows (successful ones deleted).  
+Remaining backlog waits for the next connect. Not a full historical re-send of all readings.
+
+#### Known issues
+
+| ID | Topic | Notes |
+|----|--------|--------|
+| KI-MQTT-01 | `hubId` must be UUID | Config must use real `hubs.id` — see `EXECUTION_PLAN.md` §20 |
+| KI-MQTT-02 | `patientId` must be UUID | Prefer config UUID; UI setting can override — avoid non-UUID values |
+| Fall MQTT | Not implemented | Fall uses HTTP `/fall-events` only |
+
+Policy: fix Pi config/code; do not change SHHM cloud for id mismatch.
 
 ```bash
 # after editing mqtt_config.json:
 sudo systemctl restart medical-ble-hub
 curl -s http://127.0.0.1:8741/health | python3 -m json.tool | grep -A20 mqtt
+# expect connected=true when broker reachable
+```
+
+### Pairing devices (UI is primary)
+
+1. Open hub UI: `http://<pi-ip>:8741/`
+2. **Scan** → select brand + device MAC
+3. **Pair** once (same backend as `POST /pair`)
+4. On success SQLite `devices.paired = 1` → daemon auto-sync roster includes that MAC
+
+**MAC + name alone are not enough.** Roster requires `paired = 1` and a resolvable brand.
+Rows in `scan_cache` are temporary and not paired. Failed pair leaves `paired = 0` (or removes stub).
+
+```bash
+sqlite3 medical_ble_web/data/poc.db \
+  "SELECT id, brand, model, mac, name, paired FROM devices;"
 ```
 
 ### Hub matching (MAC-strict)

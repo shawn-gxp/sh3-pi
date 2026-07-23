@@ -414,10 +414,10 @@ Before any code:
 
 | | |
 |---|---|
-| **Status** | Open (confirmed 2026-07-20 / 2026-07-21) |
-| **Severity** | High — MQTT messages arrive but are **not persisted** by cloud |
+| **Status** | **Mitigated in config (2026-07-23)** — lab `mqtt_config.json` uses real hub UUID; code still allows any string (harden UUID validation later). Was Open (confirmed 2026-07-20 / 2026-07-21) with slug. |
+| **Severity** | High when misconfigured — MQTT messages arrive but are **not persisted** by cloud |
 | **Where** | SHHM Docker backend `dataProcessingService.js` → `Hub.findByPk(hubId)` |
-| **Local config** | `medical_ble_web/mqtt_config.json` → `"hub_id": "pi-hub-sh3-01"` |
+| **Local config** | `medical_ble_web/mqtt_config.json` → `hub_id` must be **`hubs.id` UUID** (not slug `pi-hub-sh3-01`) |
 | **Local publisher** | `medical_ble_web/mqtt_bridge.py` → payload field `hubId` |
 
 #### Symptom (cloud log)
@@ -519,7 +519,7 @@ Cloud log: `MQTT Received: health/readings` → `Processing data: { hubId: 'pi-h
 
 | | |
 |---|---|
-| **Status** | Open (confirmed in same traces as KI-MQTT-01) |
+| **Status** | **Partially mitigated (2026-07-23)** — lab config sets patient UUID; UI `settings.patient_id` still overrides config if set — keep UI/settings as real UUID or empty. |
 | **Severity** | Medium–High — next failure after hub UUID is fixed if patient column is UUID |
 | **Where** | Pi `mqtt_bridge.publish_clinical_reading` patient resolution |
 | **Cloud** | Optional field; if present and typed as UUID, Postgres will reject `0001` the same way |

@@ -1,11 +1,12 @@
-# Medical BLE Web POC
+# Medical BLE Web (hub UI + daemon)
 
-Local-only proof-of-concept UI for the medical BLE toolkit.
+BLE medical hub web app + job orchestrator.
 
-- **Depends only on** `medical_ble_toolkit` (standalone HAL — no sibling packages)
-- **FastAPI** backend on `127.0.0.1:8741`
-- **SQLite** at `data/poc.db`
-- **All brands** from the interactive CLI catalog
+- **Depends on** `medical_ble_toolkit` (HAL)
+- **FastAPI** on port **8741** (LAN: `0.0.0.0` via `start_hub.sh` / systemd)
+- **SQLite** at `data/poc.db` (source of truth for devices + readings)
+- **MQTT** clinical publish via `mqtt_bridge.py` + `mqtt_config.json` (optional)
+- **Fall detection is a separate process** on port **8742** (`fall_detection_pi.web_server`) — not mounted here
 - **Windows (WinRT)** and **Linux (BlueZ)**
 
 ## Setup
@@ -54,9 +55,25 @@ cd medical_ble_web
 PYTHONPATH=.. ../.venv/bin/python app.py
 ```
 
-Opens: **http://127.0.0.1:8741**
+Opens: **http://127.0.0.1:8741** (phone: `http://<pi-ip>:8741`)
+
+**Pi systemd unit:** `medical-ble-hub` (not `medical-ble-web`).
 
 **Live SpO2:** WebSocket push + **auto-reconnect** if the BLE link goes silent/drops (Masimo). Click **Live stop** to end.
+
+## Pairing (primary path = UI)
+
+1. Scan for devices on the hub UI  
+2. Select **brand** + MAC → **Pair** once  
+3. Success → SQLite `devices.paired = 1` → auto-sync roster includes that MAC  
+
+MAC/name alone without `paired=1` is **not** treated as paired. See `docs/LINUX.md`.
+
+## MQTT (clinical only)
+
+Edit `mqtt_config.json` (`hub_id` / `patient_id` must be cloud **UUIDs**, broker LAN IP).  
+Restart hub after changes. Fall alerts use **HTTP** on the fall service, not this bridge.  
+Details: `docs/LINUX.md`, `docs/EXECUTION_PLAN.md` §20.
 
 ## API
 

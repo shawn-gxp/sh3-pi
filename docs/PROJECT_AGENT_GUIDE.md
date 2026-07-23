@@ -369,8 +369,9 @@ Docs: `datasheets/FORA/FORA_FIRST_PARTY_PROTOCOL.md`. Reliability checklist is �
 | `ble_jobs.py` | **Orchestrator** — BLE global lock & async `_get_start_lock()` guards; `job_scan`, `job_pair`, `job_sync`, live start/stop, cycle, Nipro hands-free, `job_daemon_start/stop`, `_hub_roster`, `_hub_run_session`, dashboard push |
 | `db.py` | SQLite schema + CRUD (devices, sessions, readings, scan_cache); WAL; `threading.local()` connection pooling; optional paired JSON export |
 | `brands.py` | UI-facing brand/company list (what user picks in console) |
-| `mqtt_bridge.py` | Publish clinical rows to MQTT `health/readings` (config-driven; hub/patient IDs); thread-safe locked globals |
-| `mqtt_config.json` | Broker, topic, hub_id, patient_id, enable flag |
+| `mqtt_bridge.py` | Publish **clinical** rows to MQTT `health/readings` + outbox; heartbeat; hub/patient IDs from config (UUIDs required by cloud) |
+| `mqtt_config.json` | Broker, topic, hub_id, patient_id, enable flag — **vitals only**; fall does not use this file |
+| Fall process | Separate `fall_detection_pi.web_server` :8742; alerts via **HTTP** `/fall-events` only (no MQTT yet) |
 | `_serve.py` / `run_web.ps1` | Local serve helpers |
 | `static/index.html` | Simple console UI (no heavy SPA framework) |
 | `test.py` | Lightweight web/API smoke helpers |

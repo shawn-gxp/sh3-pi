@@ -7,11 +7,19 @@
 **Last updated:** 2026-07-23  
 
 This document explains **what we built**, **why**, the **equations**, state machine,
-APIs, config, and **known reliability limits**. It is the source of truth before further
-hardening or MQTT work.
+APIs, config, and **known reliability limits**. It is the source of truth for fall CV
+and cloud alert path.
 
 **Process model:** BLE and fall are **two independent servers**. Fall math/rules live only
 in `fall_detection_pi`; the BLE hub does **not** import or host fall routes.
+
+**Northbound data planes (as of 2026-07-23):**
+
+| Data | Process | Transport | Destination |
+|------|---------|-----------|-------------|
+| Clinical vitals (BP, temp, SpO2, glucose) | BLE hub `:8741` | **MQTT** `health/readings` | Docker backend MQTT consumer |
+| Fall / bed-exit events | Fall service `:8742` | **HTTP** `POST …/fall-events` | Backend `fallDetectionService` (same as Android) |
+| Fall MQTT | — | **Not implemented** | Backend does not subscribe a fall topic today |
 
 ---
 
@@ -451,14 +459,39 @@ Search order for load/save is documented in `fall_detection_pi/config.py`
 
 ---
 
-## 10. Alert HTTP payload
+## 10. Cloud alerts (HTTP only — not MQTT)
 
-When patient id is configured, `alert_api.post_event` POSTs to  
-`{FALL_BACKEND_BASE_URL}/fall-events`:
+Fall detection **does not** use `medical_ble_web/mqtt_bridge.py` or `mqtt_config.json`.  
+That MQTT path is **clinical vitals only** (BLE hub). Fall matches the Android app:
+`FallAlertApi` → REST.
+
+### When events fire
+`camera_loop.publish_event_if_needed` → `alert_api.post_event` after state entry + cooldown
+(default `FALL_COOLDOWN_MS=60000`). Event types:
+
+| `eventType` | Severity | Meaning |
+|-------------|----------|---------|
+| `FALL_DETECTED` | critical | Fall rules matched |
+| `PATIENT_LEFT_BED` | high | Torso outside bed ROI |
+| `PATIENT_NEAR_EDGE` | high | Near bed edge band |
+
+### Config (env)
+
+| Variable | Role |
+|----------|------|
+| `FALL_PATIENT_ID` | **Required** cloud patient UUID (or resolvable id). If missing / `REPLACE_WITH_PATIENT_ID` → **skip** publish |
+| `FALL_BACKEND_BASE_URL` | API base, e.g. `http://172.16.2.156:5173/api` |
+| `FALL_DEVICE_ID` | Device label in payload (default `edge-ai-camera-01`) |
+| `FALL_INTEGRATION_KEY` | Optional header `x-integration-key` |
+| `FALL_COOLDOWN_MS` | Min ms between same event type (default 60000) |
+
+### HTTP payload
+
+`POST {FALL_BACKEND_BASE_URL}/fall-events`:
 
 ```json
 {
-  "patientId": "…",
+  "patientId": "04d3030f-af86-44dd-9f7f-86f51cf08391",
   "eventType": "FALL_DETECTED",
   "severity": "critical",
   "fallDetected": true,
@@ -472,8 +505,18 @@ When patient id is configured, `alert_api.post_event` POSTs to
 }
 ```
 
-Posts run on a **daemon thread** (non-blocking). **No retry queue** yet.  
-Default patient id → **skip publish** (log warning only).
+Posts run on a **daemon thread** (non-blocking). **No outbox / retry queue** — failed
+HTTP is logged only; next event after cooldown may retry. Local UI still works without
+backend.
+
+### Backend contract (SHHMHub)
+Cloud handler: `backend/src/services/fallDetectionService.js` → creates Alert + SSE.
+MQTT server currently subscribes to `health/readings` and `hub/+/heartbeat` only — **not**
+fall events.
+
+### Future MQTT (not done)
+Optional later (H1.5.3): publish fall events on a topic (e.g. `health/fall-events`) and/or
+keep HTTP. Until then, configure **HTTP** for production alerts.
 
 ---
 
@@ -532,32 +575,49 @@ python fall_detection_pi/tests/_tryout_sim.py
 
 ### Server 1 — BLE hub (port **8741**)
 
+**Pi appliance (systemd unit name `medical-ble-hub`, not `medical-ble-web`):**
+
+```bash
+sudo systemctl restart medical-ble-hub
+# or manual:
+cd ~/Desktop/sh3-hw-layer-experiments   # shawn-gxp/sh3-pi clone
+./start_hub.sh                          # root wrapper → scripts/deploy
+# https://<pi-ip>:8741/  or http://<pi-ip>:8741/
+```
+
+**Dev / sibling SHHMHub layout:**
+
 ```bash
 cd sh3-pi/medical_ble_web
-set PYTHONPATH=..;.
-python app.py --ssl
-# https://127.0.0.1:8741/   — pair/sync devices only
+PYTHONPATH=..:. python3 app.py --ssl
 ```
 
 ### Server 2 — Fall detection (port **8742**)
 
+No systemd unit yet — run as a second process.
+
+**shawn-gxp/sh3-pi clone (package inside repo):**
+
 ```bash
-# Workspace root (parent of fall_detection_pi)
-set PYTHONPATH=.
-python -m fall_detection_pi.web_server --ssl
-# https://127.0.0.1:8742/            — fall UI
-# https://127.0.0.1:8742/api/fall/status
+cd ~/Desktop/sh3-hw-layer-experiments
+export PYTHONPATH=$PWD
+export FALL_PATIENT_ID=04d3030f-af86-44dd-9f7f-86f51cf08391
+export FALL_BACKEND_BASE_URL=http://172.16.2.156:5173/api   # adjust to your API
+python3 -m fall_detection_pi.web_server --ssl
+# https://<pi-ip>:8742/
+```
+
+**SHHMHub sibling layout:**
+
+```bash
+cd /path/to/SHHMHub
+export PYTHONPATH=$PWD
+python3 -m fall_detection_pi.web_server --ssl
 ```
 
 Override: `FALL_PORT=8742`, `FALL_HOST=0.0.0.0`.
 
 The BLE hub index page links to the fall service on port 8742 (same hostname).
-### Enable backend alerts
-
-```bash
-set FALL_PATIENT_ID=your-patient-uuid
-set FALL_BACKEND_BASE_URL=https://your-backend/api
-```
 
 ---
 
