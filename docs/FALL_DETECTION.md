@@ -1,224 +1,594 @@
-# Fall Detection Architecture
+# Fall Detection — Design, Math, and Operations
 
-Computer-vision fall detection for the Raspberry Pi Hub. Logic evolved from the Android
-Kotlin port (`edge-ai-fall-detection`) with polygon ROI and dual fall paths.
+**Status:** Lab-validated prototype (phone landmarks + hub rules)  
+**Package:** `fall_detection_pi` (standalone; not nested under BLE-only code)  
+**Hub consumer:** `medical_ble_web` (optional)  
+**Android lineage:** `edge-ai-fall-detection` (Kotlin MediaPipe / ROI rules)  
+**Last updated:** 2026-07-23  
 
-## Package separation
+This document explains **what we built**, **why**, the **equations**, state machine,
+APIs, config, and **known reliability limits**. It is the source of truth before further
+hardening or MQTT work.
 
-**`fall_detection_pi` is a standalone package** — not nested under `sh3-pi`.
+---
+
+## 1. Goals and non-goals
+
+### Goals
+- Detect **in bed (safe)**, **near bed edge**, **left bed**, and **fall**.
+- Run on a **Raspberry Pi hub** with optional USB/Pi camera.
+- Allow **calibration** of the bed region from a browser/phone UI.
+- Work **without a local camera** by accepting client-side pose landmarks (phone).
+- Keep fall CV **separable** from BLE medical device collection (`sh3-pi` / hub toolkit).
+
+### Non-goals (current)
+- FDA/clinical certification of the algorithm.
+- Full-body multi-person tracking (we take **one** pose).
+- MQTT fall alerts (HTTP alert sink exists; MQTT not wired for fall yet).
+- Hardware buzzer/GPIO (alarm is log stub).
+
+---
+
+## 2. Repository layout (why two packages)
+
+Fall detection is **not** a submodule of the BLE stack. Two layouts are supported:
+
+### A. Development repo (`shawn-gxp/sh3-pi`)
+
+Single clone for day-to-day work:
 
 ```
-workspace/   (e.g. SHHMHub/ or Desktop/pi python/)
-├── fall_detection_pi/       # this package (pip install -e ./fall_detection_pi)
-└── sh3-pi/                  # BLE hub + medical_ble_web
-    └── medical_ble_web/     # optional consumer via fall_import.py
+sh3-pi/                          # git root
+├── fall_detection_pi/           # CV package (import fall_detection_pi)
+├── medical_ble_web/             # FastAPI hub UI + /api/fall/*
+├── medical_ble_toolkit/         # BLE brands
+└── docs/FALL_DETECTION.md       # this file
 ```
 
-Install:
+`medical_ble_web/fall_import.py` finds the package under the hub root
+(`…/sh3-pi/fall_detection_pi`).
 
-```bash
-pip install -e ./fall_detection_pi
-# or set FALL_DETECTION_HOME=/abs/path/to/fall_detection_pi
+### B. Monorepo (`gxpindia/SHHMHub`, branch `feature/H1.5.2-fall-detection`)
+
+```
+SHHMHub/
+├── fall_detection_pi/           # sibling of sh3-pi
+├── sh3-pi/                      # BLE hub only (no nested fall package)
+├── edge-ai-fall-detection/      # Android Kotlin reference
+└── …
 ```
 
-Hub resolves the package via sibling path or that env var. BLE hub runs fine if fall
-is missing; `/api/fall/*` returns 503 until installed. See `GET /api/fall/status`.
+`fall_import` finds `../fall_detection_pi` relative to `sh3-pi/`.
 
-## Pipeline Overview
+### Why split
+| Reason | Detail |
+|--------|--------|
+| Ownership | Fall CV vs multi-brand BLE evolve at different rates |
+| Deploy | Hub can run BLE without MediaPipe installed |
+| Clear imports | `import fall_detection_pi` vs toolkit brands |
+| Milestone mapping | Aligns with H1.5.x fall tasks vs H1.1–H1.4 BLE |
 
-The pipeline can run as a background camera thread (FastAPI lifespan in
-`medical_ble_web/app.py`) **or** from browser-uploaded frames / landmark JSON (no host
-camera required).
+**Do not** re-nest modern fall code under `sh3-pi/fall_detection` in SHHMHub.
 
-1. **Capture / input**
-   - Local: OpenCV `CAMERA_SOURCE` (device index or `RTSP_URL`)
-   - Remote: `POST /api/fall/frame` (JPEG) or `POST /api/fall/landmarks` (33 keypoints / named dict)
-2. **Pose inference** (camera/frame paths only): **MediaPipe Tasks** `PoseLandmarker` → 33 landmarks  
-   (not the removed `mp.solutions.pose` Solutions API)
-3. **Rules engine** (`fall_detection_pi/fall_detector.py`): polygon ROI + posture + velocity
-4. **Alerting** (`alert_api.py`): rate-limited HTTP POST to backend; local alarm hooks (stubs)
+---
 
-## Module Map
+## 3. End-to-end pipeline
 
-| Path | Role |
-|------|------|
-| `fall_detection_pi/` (sibling package) | All CV logic |
-| `fall_detection_pi/config.py` | Env overrides, ROI load, pose model path/URL |
-| `fall_detection_pi/pose_model.py` | Auto-download `pose_landmarker_*.task` on first use |
-| `fall_detection_pi/fall_detector.py` | `PolygonROI`, `FallDetector`, `DetectionState` |
-| `fall_detection_pi/camera_loop.py` | PoseLandmarker (IMAGE/VIDEO), frame/landmarks handlers |
-| `fall_detection_pi/alert_api.py` | Background `POST …/fall-events` |
-| `sh3-pi/medical_ble_web/fall_import.py` | Resolves sibling package on hub boot |
-| `sh3-pi/medical_ble_web/app.py` | `/api/fall/*` routes + ROI persist |
-| `sh3-pi/medical_ble_web/static/fall.html` | ROI calibration + phone/browser camera UI |
-| `fall_detection_pi/tests/test_fall_detector.py` | Unit tests (no camera) |
+```
+                    ┌─────────────────────┐
+  USB/Pi camera ───►│ OpenCV VideoCapture │──┐
+                    └─────────────────────┘  │
+  Phone JPEG ──────►│ POST /api/fall/frame  │──┤
+                    └─────────────────────┘  │
+                                             ▼
+                              MediaPipe Tasks PoseLandmarker
+                              (33 landmarks, IMAGE or VIDEO mode)
+                                             │
+  Phone JS Pose ───►│ POST /api/fall/landmarks │ (skip host MediaPipe)
+                    └──────────────────────────┘
+                                             ▼
+                              Landmark normalize (shoulders/hips/…)
+                                             ▼
+                              FallDetector.evaluate(landmarks, PolygonROI)
+                                             ▼
+                    ┌────────────────────────────────────────┐
+                    │ DetectionState                         │
+                    │  in_safe_area | near_edge | left_bed | │
+                    │  fall_detected                         │
+                    └────────────────────────────────────────┘
+                           │                    │
+                           ▼                    ▼
+                    UI event string      publish_event_if_needed
+                    (live banner)        (HTTP /fall-events, cooldown)
+                           │
+                           ▼
+                    Local alarm stub (log)
+```
 
-## Vision stack (current)
+### Input modes
 
-| Package / API | Status |
-|---------------|--------|
-| `mediapipe>=0.10.30` | **Required** — Tasks API only (`PoseLandmarker`) |
-| `mp.solutions.pose` | **Removed** in modern mediapipe — do not use |
-| OpenCV | Brought in by mediapipe (`opencv-contrib-python`) |
-| Model file | `fall_detection_pi/models/pose_landmarker_lite.task` (auto-download) |
+| Mode | Who runs pose? | API | Landmarker mode |
+|------|----------------|-----|-----------------|
+| Local camera thread | Hub | background `camera_loop.run()` | **VIDEO** |
+| Browser JPEG upload | Hub | `POST /api/fall/frame` | **IMAGE** |
+| Browser landmarks | Phone (MediaPipe JS) | `POST /api/fall/landmarks` | none on hub |
 
-Env for models:
+**Lab result:** landmarks mode is the most reliable on Windows (no local camera required).
 
-| Env | Default | Notes |
-|-----|---------|-------|
+---
+
+## 4. Coordinate system and landmarks
+
+### Image coordinates
+- All geometry uses **normalized** image space: \(x, y \in [0, 1]\).
+- Origin: **top-left**.
+- \(+x\): right; \(+y\): **down** (standard image convention).
+- Therefore a **fall / drop** increases \(y\) over time.
+
+### MediaPipe body indices used
+
+| Name | Index | Role |
+|------|-------|------|
+| LEFT_SHOULDER | 11 | Torso |
+| RIGHT_SHOULDER | 12 | Torso |
+| LEFT_HIP | 23 | Torso |
+| RIGHT_HIP | 24 | Torso |
+| LEFT_KNEE / ANKLE | 25 / 27 | BBox aspect only (fallback to hip) |
+| RIGHT_KNEE / ANKLE | 26 / 28 | BBox aspect only |
+
+Visibility gate uses **shoulders + hips only** (core). Knees/ankles often have low
+visibility on phone cameras; gating on them previously forced permanent “empty”
+frames and a stuck SAFE UI.
+
+---
+
+## 5. Equations
+
+### 5.1 Torso center
+
+\[
+x_t = \frac{x_{LS} + x_{RS} + x_{LH} + x_{RH}}{4}, \quad
+y_t = \frac{y_{LS} + y_{RS} + y_{LH} + y_{RH}}{4}
+\]
+
+This point is tested against the bed polygon (not head or feet alone).
+
+### 5.2 Torso angle (posture axis)
+
+Shoulder midpoint and hip midpoint:
+
+\[
+(x_s, y_s) = \left(\frac{x_{LS}+x_{RS}}{2},\; \frac{y_{LS}+y_{RS}}{2}\right)
+\]
+\[
+(x_h, y_h) = \left(\frac{x_{LH}+x_{RH}}{2},\; \frac{y_{LH}+y_{RH}}{2}\right)
+\]
+
+\[
+\theta = \left|\operatorname{atan2}(y_h - y_s,\; x_h - x_s)\right| \cdot \frac{180}{\pi}
+\quad \text{(degrees)}
+\]
+
+| Interpretation (image space) | Typical \(\theta\) |
+|------------------------------|--------------------|
+| Person upright (hips below shoulders) | near \(90^\circ\) |
+| Person lying left–right | near \(0^\circ\) (or \(180^\circ\), same abs) |
+
+**Horizontal posture flag:**
+
+\[
+\text{is\_horizontal} = (\theta < \theta_{\max}), \quad \theta_{\max} = 25^\circ
+\quad \text{(config: `horizontal_angle_deg`)}
+\]
+
+### 5.3 Bounding-box aspect (lying proxy)
+
+Using shoulders, hips, knees (or hip fallbacks):
+
+\[
+w = \max x_i - \min x_i, \quad
+h = \max y_i - \min y_i
+\]
+\[
+a = \begin{cases}
+h / w & w > 0.01 \\
+2.0 & \text{otherwise}
+\end{cases}
+\]
+
+\[
+\text{is\_lying} = (a < a_{\max}), \quad a_{\max} = 0.6
+\quad \text{(config: `lying_aspect_ratio`)}
+\]
+
+Wide-and-short silhouette → “lying-like”.  
+\[
+\text{is\_posture\_down} = \text{is\_horizontal} \lor \text{is\_lying}
+\]
+
+### 5.4 Region of interest (bed polygon)
+
+ROI is a polygon \(P = \{(x_i, y_i)\}_{i=1}^{n}\), \(n \ge 3\), normalized.
+
+**Contains:** OpenCV `pointPolygonTest` when available; else ray-casting.
+
+**Signed distance** \(d(x_t, y_t)\):
+- \(d > 0\): inside  
+- \(d < 0\): outside  
+- Magnitude: distance to nearest edge (OpenCV measureDist, or pure-Python segment distance)
+
+**Near edge** (outside but close):
+
+\[
+\text{near} = (\lnot \text{inside}) \land \bigl(d > -\;\tau\bigr), \quad
+\tau = 0.05
+\quad \text{(config: `edge_tolerance`)}
+\]
+
+**Axis-aligned bounds** of the polygon (for classic “below bed”):
+
+\[
+y_{\text{bed bottom}} = \max_i y_i
+\]
+
+\[
+\text{below\_bed} = (y_t > y_{\text{bed bottom}})
+\]
+
+Note: this is an **AABB bottom**, not a true 3D bed plane. Tilted polygons are approximate.
+
+### 5.5 Rapid drop (velocity)
+
+Feature history stores \((x_t, y_t, \theta, a, t)\) for the last \(N\) samples
+(`history_maxlen = 25`).
+
+Over a window \(T = 1.0\,\mathrm{s}\):
+
+\[
+\Delta y = y_t^{(\text{latest})} - y_t^{(\text{oldest in window})}
+\]
+
+\[
+\text{is\_rapid\_drop} = (\Delta y > v_{\min}), \quad
+v_{\min} = 0.08
+\quad \text{(8% of frame height in 1 second; `rapid_drop_threshold`)}
+\]
+
+Because \(+y\) is down, a **positive** \(\Delta y\) means the torso moved **downward** in the image.
+
+### 5.6 Fall candidates
+
+Three OR-ed raw conditions (then temporal confirm):
+
+**Classic (Android-style):**
+\[
+\text{classic\_fall} =
+(\lnot \text{inside}) \land \text{is\_horizontal} \land \text{below\_bed}
+\]
+
+**Velocity:**
+\[
+\text{velocity\_fall} =
+(\lnot \text{inside}) \land \text{is\_posture\_down} \land \text{is\_rapid\_drop}
+\]
+
+**Sustained down outside** (slow slide / already on floor):
+\[
+\text{down\_outside} = (\lnot \text{inside}) \land \text{is\_posture\_down}
+\]
+Count consecutive frames with `down_outside`. When count \(\ge N_{\text{sust}}\)
+(\(N_{\text{sust}} = 10\)):
+
+\[
+\text{sustained\_fall} = \text{true}
+\]
+
+**Raw fall signal:**
+\[
+\text{fall\_raw} = \text{classic\_fall} \lor \text{velocity\_fall}
+\]
+(and sustained contributes via the same confirm counter when active)
+
+**Temporal confirm (anti-flicker for fall only):**
+\[
+\text{fall\_detected} =
+\bigl(\text{consecutive\_fall\_frames} \ge N_{\text{fall}}\bigr), \quad
+N_{\text{fall}} = 3
+\]
+
+Counter increments when `fall_raw` or `sustained_fall`, else resets to 0.
+
+---
+
+## 6. State machine (output)
+
+Priority order in code:
+
+1. If `fall_detected` → **FALL**  
+2. Else if `inside` → **SAFE** (`in_safe_area`)  
+3. Else if `near` → **NEAR_EDGE**  
+4. Else → **LEFT_BED**
+
+| Output | Instant? | UI / API event | Backend event type |
+|--------|----------|----------------|--------------------|
+| In bed | Yes | `SAFE` | (clears local published type) |
+| Near edge | Yes | `PATIENT_NEAR_EDGE` | same |
+| Left bed | Yes | `PATIENT_LEFT_BED` | same |
+| Fall | After 3 frames of evidence | `FALL_DETECTED` | same |
+
+### Why region states are instant, fall is not
+- **UX:** Old Android port felt “live”; multi-frame voting on leave made the UI look stuck on SAFE during early experiments.
+- **Safety for fall:** Require 3 frames so a single noisy pose does not spam CRITICAL.
+
+### Side effects on state *entry* only
+- Toast log + alarm stub fire when the **event string changes** (not every frame).
+- HTTP publish is further limited by **cooldown** (default 60s per event type).
+
+---
+
+## 7. Module map
+
+| Module | Responsibility |
+|--------|----------------|
+| `fall_detection_pi/fall_detector.py` | Pure rules: ROI, posture, velocity, state |
+| `fall_detection_pi/camera_loop.py` | Camera / frame / landmarks I/O, landmarker, overlays, alarms |
+| `fall_detection_pi/pose_model.py` | Download/cache `.task` model |
+| `fall_detection_pi/config.py` | Env + hub_config ROI load/save path |
+| `fall_detection_pi/alert_api.py` | Async HTTP POST to backend |
+| `medical_ble_web/fall_import.py` | Locate package (nested or sibling) |
+| `medical_ble_web/app.py` | Lifespan camera thread + `/api/fall/*` |
+| `medical_ble_web/static/fall.html` | ROI draw + phone pose + status banner |
+
+---
+
+## 8. HTTP API (hub)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/fall/status` | Package found? path? |
+| `GET` | `/api/fall/roi` | Current bed polygon |
+| `POST` | `/api/fall/roi` | Set polygon + persist `hub_config.json` |
+| `POST` | `/api/fall/landmarks` | Evaluate pose JSON (preferred for phone) |
+| `POST` | `/api/fall/frame` | JPEG → hub PoseLandmarker |
+| `GET` | `/api/fall/stream` | MJPEG last processed frame |
+| UI | `/static/fall.html` | Calibration + monitoring |
+
+If package missing → **503** on fall routes (BLE hub still runs).
+
+### Landmarks body shapes
+1. **Named dict** (tests / simple clients):
+   ```json
+   {
+     "landmarks": {
+       "LEFT_SHOULDER": {"x": 0.4, "y": 0.3, "visibility": 1},
+       "RIGHT_SHOULDER": {"x": 0.6, "y": 0.3, "visibility": 1},
+       "LEFT_HIP": {"x": 0.4, "y": 0.45, "visibility": 1},
+       "RIGHT_HIP": {"x": 0.6, "y": 0.45, "visibility": 1}
+     }
+   }
+   ```
+2. **MediaPipe 33-list** (phone JS): array of `{x,y,z,visibility}`; indices 11,12,23–28 used.
+
+### Response (landmarks)
+```json
+{
+  "ok": true,
+  "event": "SAFE",
+  "has_pose": true,
+  "detection_state": {
+    "in_safe_area": true,
+    "near_edge": false,
+    "fall_detected": false,
+    "left_bed": false,
+    "torso_x": 0.5,
+    "torso_y": 0.375,
+    "torso_angle_deg": 90.0
+  }
+}
+```
+
+`event` is derived from **live** detection state (not blocked by HTTP cooldown).
+
+---
+
+## 9. Configuration
+
+### Environment
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `FALL_DETECTION_HOME` | (auto) | Path to package dir |
+| `FALL_PATIENT_ID` | `REPLACE_WITH_PATIENT_ID` | **Must set** or HTTP alerts are skipped |
+| `FALL_BACKEND_BASE_URL` | `http://172.16.2.156:5173/api` | Alert base URL |
+| `FALL_DEVICE_ID` | `edge-ai-camera-01` | Device id in payload |
+| `FALL_INTEGRATION_KEY` | empty | Optional header |
+| `FALL_COOLDOWN_MS` | `60000` | Min ms between same event type |
+| `FALL_CAMERA_SOURCE` / `RTSP_URL` | `0` | OpenCV capture |
 | `FALL_POSE_MODEL` | `lite` | `lite` \| `full` \| `heavy` |
-| `FALL_POSE_MODEL_PATH` | `fall_detection_pi/models/pose_landmarker_<variant>.task` | Skip download if file exists |
-| `FALL_POSE_MODEL_URL` | Google CDN for chosen variant | Override download URL |
+| `FALL_POSE_MODEL_PATH` | package `models/…` | Local `.task` file |
+| `FALL_HUB_CONFIG` | auto-search | Path to `hub_config.json` |
+| `FALL_MIN_DET_CONF` / `_TRACK_` / `_PRES_` | `0.5` | PoseLandmarker thresholds |
 
-Running modes:
+### Detector defaults (code)
 
-- **IMAGE** — `POST /api/fall/frame` (independent stills)
-- **VIDEO** — local camera loop (`detect_for_video` + monotonic timestamps)
+| Parameter | Default | Role |
+|-----------|---------|------|
+| `edge_tolerance` | 0.05 | Near-edge band |
+| `min_visibility` | 0.5 | Core landmark gate |
+| `horizontal_angle_deg` | 25 | Horizontal torso |
+| `lying_aspect_ratio` | 0.6 | Lying bbox |
+| `rapid_drop_threshold` | 0.08 | Δy in 1s |
+| `rapid_drop_window_s` | 1.0 | Velocity window |
+| `fall_confirm_frames` | 3 | Fall temporal |
+| `sustained_fall_frames` | 10 | Slow / on-floor |
 
-## ROI (bed polygon)
+### ROI persistence
+JSON under key **`fall_detection.polygon`** (name kept for backward compatibility;
+package folder is `fall_detection_pi`):
 
-- **Shape**: list of ≥3 normalized points `(x, y)` in `[0, 1]`
-- **Load**: `hub_config.json` → `fall_detection.polygon` (repo root; path fixed — was wrong `parent³`)
-- **Live update**: `POST /api/fall/roi` updates memory + rewrites `hub_config.json`
-- **Read**: `GET /api/fall/roi`
-
-Default fallback polygon if no hub config: `(0.1,0.1)…(0.1,0.9)`.
-
-## Core Evaluation Logic
-
-Landmarks used:
-
-- Shoulders: 11, 12
-- Hips: 23, 24
-- Knees / ankles: 25–28 (visibility fallbacks)
-
-Per frame:
-
-1. **Torso center** — mean of shoulders + hips
-2. **Torso angle** — `atan2` shoulder-mid → hip-mid; `is_horizontal` if angle &lt; 25°
-3. **BBox aspect** — height/width; `is_lying` if ratio &lt; 0.6
-4. **Polygon** — `contains` + signed `distance` (OpenCV or pure-Python edge distance)
-5. **Rapid drop** — Δy of torso center &gt; 0.08 within last 1s of history
-6. **Temporal voting**
-   - FALL / NEAR / LEFT: ≥5 consecutive frames
-   - INSIDE: ≥2 frames (faster clear)
-
-### Fall conditions (two paths)
-
-Both require **torso outside ROI** and **down posture** (`is_horizontal` angle &lt; 25° **or** `is_lying` bbox aspect &lt; 0.6):
-
-| Path | Extra requirement | Confirm frames (default) | Catches |
-|------|-------------------|--------------------------|---------|
-| **Rapid** | torso Δy &gt; 0.08 within ~1s | 5 | hard falls |
-| **Sustained** | none (posture only) | 15 | slow slide, already on floor |
-
-```
-confirmed_fall =
-    rapid_frames >= 5
-    OR sustained_down_frames >= 15
+```json
+{
+  "fall_detection": {
+    "polygon": [[0.2, 0.2], [0.8, 0.2], [0.8, 0.6], [0.2, 0.6]]
+  }
+}
 ```
 
-While posture is down outside the bed, the patient is on the **fall track** — not `left_bed` (walking away upright is separate).
+Search order for load/save is documented in `fall_detection_pi/config.py`
+(env → sibling hub `hub_config.json` → package-local → toolkit path).
 
-### State machine
+---
 
-| State | Confirmed when | Event type |
-|-------|----------------|------------|
-| `in_safe_area` | 2× INSIDE | clears alarm; no backend event |
-| `near_edge` | 5× outside upright, `dist > -edge_tolerance` (default 0.05) | `PATIENT_NEAR_EDGE` |
-| `fall_detected` | rapid (5) or sustained down (15) | `FALL_DETECTED` |
-| `left_bed` | 5× upright LEFT (not fall) | `PATIENT_LEFT_BED` |
-| transitional | voting not met | **no alert** |
+## 10. Alert HTTP payload
 
-Thread safety: `FallDetector.evaluate` is locked; camera + HTTP paths share one detector under `camera_loop._lock` for ROI + alerts. ROI update calls `fall_detector.reset()`.
+When patient id is configured, `alert_api.post_event` POSTs to  
+`{FALL_BACKEND_BASE_URL}/fall-events`:
 
-## HTTP API
+```json
+{
+  "patientId": "…",
+  "eventType": "FALL_DETECTED",
+  "severity": "critical",
+  "fallDetected": true,
+  "detectedAt": "2026-07-23T…Z",
+  "sourceApp": "EdgeAiFallDetection",
+  "deviceId": "edge-ai-camera-01",
+  "cooldownMs": 60000,
+  "confidence": 0.95,
+  "nearEdge": false,
+  "inSafeArea": false
+}
+```
 
-| Method | Path | Body | Notes |
-|--------|------|------|-------|
-| `GET` | `/api/fall/stream` | — | MJPEG of last processed frame |
-| `GET` | `/api/fall/roi` | — | Current polygon |
-| `POST` | `/api/fall/roi` | `{ "polygon": [{"x","y"},…] }` | Live + persist |
-| `POST` | `/api/fall/frame` | raw JPEG bytes | Host MediaPipe if installed |
-| `POST` | `/api/fall/landmarks` | `{ "landmarks": … }` | 33-list or named dict; **best for try-out without camera** |
+Posts run on a **daemon thread** (non-blocking). **No retry queue** yet.  
+Default patient id → **skip publish** (log warning only).
 
-## Alerting & config
+---
 
-| Setting | Env var | Default |
-|---------|---------|---------|
-| Backend base | `FALL_BACKEND_BASE_URL` | `http://172.16.2.156:5173/api` |
-| Patient id | `FALL_PATIENT_ID` | `REPLACE_WITH_PATIENT_ID` (**skips publish**) |
-| Device id | `FALL_DEVICE_ID` | `edge-ai-camera-01` |
-| Integration key | `FALL_INTEGRATION_KEY` | empty |
-| Cooldown | `FALL_COOLDOWN_MS` | `60000` |
-| Camera | `FALL_CAMERA_SOURCE` or `RTSP_URL` | `0` |
-| Hub config path | `FALL_HUB_CONFIG` | optional override |
+## 11. Design history (what we did and why)
 
-Cooldown is per event type: same `event_type` will not re-post within `COOLDOWN_MS`.
-Posts run on a daemon thread so the camera loop is not blocked.
+| Decision | Why |
+|----------|-----|
+| Leave Android Kotlin as reference; reimplement in Python | Pi hub runtime is Python FastAPI |
+| MediaPipe **Tasks** `PoseLandmarker`, not `mp.solutions.pose` | Solutions API removed in mediapipe ≥0.10.30 |
+| Auto-download `.task` model | Deploy without checking in multi‑MB binaries |
+| Polygon ROI (not only axis-aligned rect) | Bed not always rectangular in camera view |
+| Instant near/left | Multi-frame voting made UI look “stuck on SAFE” |
+| Fall 3-frame confirm | Reduce single-frame false CRITICAL |
+| Sustained down path | Catch slow slide / already on floor without velocity |
+| Core-only visibility | Ankle/knee low-vis froze detection on phones |
+| Alarm only on state entry | Prevent per-frame log spam |
+| Package split `fall_detection_pi` | Separate CV from BLE lifecycle and monorepo ownership |
+| Phone landmarks API | Reliable try-out without Pi camera on Windows |
 
-## How to try it out
+### Evolution from first Python port
+1. **v1 port:** `RectFNorm` + single-frame fall = outside ∧ horizontal ∧ below_bed.  
+2. **v2:** Polygon + temporal + rapid drop (too sticky for leave/near).  
+3. **v3 (current):** Instant region states + multi-path fall + package split + Tasks API.
 
-### 1. Unit tests (no deps beyond pytest)
+---
+
+## 12. How to run (development)
+
+### Install (dev repo root = `sh3-pi`)
 
 ```bash
-python -m pytest fall_detection_pi/tests/test_fall_detector.py -v
+pip install -r requirements.txt
+pip install -r medical_ble_web/requirements.txt
+pip install -r fall_detection_pi/requirements.txt
+# optional editable:
+# pip install -e ./fall_detection_pi
 ```
 
-### 2. Landmarks simulation (no camera)
+### Unit tests (no camera)
 
 ```bash
-# from repo root
 set PYTHONPATH=.
+python -m pytest fall_detection_pi/tests/test_fall_detector.py -v
 python fall_detection_pi/tests/_tryout_sim.py
 ```
 
-Covers IN BED → NEAR EDGE → LEFT BED → FALL via `process_normalized_landmarks`.
-
-### 3. Web UI + API
+### Hub + SSL
 
 ```bash
-# from repo root, with your usual hub start command, e.g.:
-uvicorn medical_ble_web.app:app --host 0.0.0.0 --port 8000
+cd medical_ble_web
+set PYTHONPATH=..;.;../..
+python app.py --ssl
 ```
 
-Then open `http://<hub>:8000/static/fall.html` to draw the bed ROI and stream / phone-camera frames.
+- UI: `https://127.0.0.1:8741/static/fall.html`  
+- Status: `GET /api/fall/status`  
 
-Manual landmarks POST example:
+### Enable backend alerts
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/api/fall/landmarks ^
-  -H "Content-Type: application/json" ^
-  -d "{\"landmarks\":{\"LEFT_SHOULDER\":{\"x\":0.4,\"y\":0.3,\"visibility\":1},\"RIGHT_SHOULDER\":{\"x\":0.6,\"y\":0.3,\"visibility\":1},\"LEFT_HIP\":{\"x\":0.4,\"y\":0.45,\"visibility\":1},\"RIGHT_HIP\":{\"x\":0.6,\"y\":0.45,\"visibility\":1},\"LEFT_KNEE\":{\"x\":0.4,\"y\":0.6,\"visibility\":1},\"RIGHT_KNEE\":{\"x\":0.6,\"y\":0.6,\"visibility\":1},\"LEFT_ANKLE\":{\"x\":0.4,\"y\":0.8,\"visibility\":1},\"RIGHT_ANKLE\":{\"x\":0.6,\"y\":0.8,\"visibility\":1}}}"
+set FALL_PATIENT_ID=your-patient-uuid
+set FALL_BACKEND_BASE_URL=https://your-backend/api
 ```
 
-Repeat 2–3 times to confirm `in_safe_area` (temporal voting).
+---
 
-## Known limitations / remaining work
+## 13. Known limitations (audit summary)
 
-| Item | Status |
-|------|--------|
-| ROI from `hub_config.json` | **Fixed** (correct repo-root path) |
-| ROI REST + UI | **Done** (`/api/fall/roi`, `fall.html`) |
-| Rapid-drop + temporal voting | **Done** (not the old single-frame “below_bed” only) |
-| `left_bed` on `DetectionState` + temporal gate | **Fixed** (was firing every non-safe frame) |
-| Pure-Python `near_edge` distance | **Fixed** (was constant ±0.1 stub) |
-| Landmarks API accepts `NormalizedPoint` + JSON dicts | **Fixed** |
-| MediaPipe `min_presence_confidence` on older builds | **Fixed** (TypeError fallback) |
-| `FALL_PATIENT_ID` placeholder | Alerts intentionally skipped until set |
-| Backend URL | Env-overridable; still a private LAN default |
-| GPIO / real alarm | Still log stubs in `play_alarm_sound_and_vibrate` |
-| Host without OpenCV/MediaPipe | Landmarks path works; camera/`/frame` returns note |
-| MediaPipe Solutions (`mp.solutions.pose`) | **Replaced** by Tasks `PoseLandmarker` (mediapipe 0.10.30+) |
-| `datetime.utcnow()` in alerts | **Replaced** with timezone-aware UTC |
-| Dual OpenCV packages (`headless` + `contrib`) | Avoid — mediapipe already depends on `opencv-contrib-python` |
+Documented so we harden deliberately later—not as silent surprises.
 
-## Tests
+| Area | Limitation |
+|------|------------|
+| Edge of bed | Instant near/left can **flicker** if torso jitters across boundary |
+| Fall false positives | Sitting/kneeling outside + “lying-like” bbox can trip **sustained fall** |
+| Rapid drop | Walking toward camera / sitting can increase \(y\) without a fall |
+| below_bed | Uses polygon **max Y**, not true bed plane |
+| No pose | Can surface as SAFE-like empty path depending on client |
+| Frame upload event | Prefer **landmarks** path for UI correctness (frame path may lag publish state) |
+| Alerts | Off until patient id set; no MQTT fall topic yet |
+| Alarm | Log stub only |
+| Pi camera | Continuous VIDEO path not soak-tested on device at 15+ FPS |
+| Security | Fall APIs unauthenticated (LAN hub assumption) |
+
+---
+
+## 14. Reliability stance (current)
+
+| Use case | Ready? |
+|----------|--------|
+| ROI calibration + leave/near demo | **Yes** |
+| Fall demo (lie down outside bed / rapid drop) | **Yes** (tune thresholds if needed) |
+| 24/7 ward without supervision | **Not yet** — needs hysteresis, hold-on-occlusion, alert pipeline, Pi soak |
+| Clinical claim | **No** |
+
+---
+
+## 15. Tests
 
 `fall_detection_pi/tests/test_fall_detector.py` covers:
 
-- polygon contains + signed distance
-- inside / fall / left_bed / near_edge temporal behaviour
-- low visibility / missing ROI
-- `process_normalized_landmarks` (objects + JSON dicts)
-- config loads hub polygon
+- Polygon contains + signed distance  
+- Instant inside / near / left  
+- Classic fall + rapid-drop fall  
+- Core visibility vs low knee visibility  
+- API-style dict processing via `process_normalized_landmarks`  
+
+---
+
+## 16. Related code and docs
+
+| Path | Role |
+|------|------|
+| `fall_detection_pi/README.md` | Short package install |
+| `docs/LINUX.md` | Pi install of sibling package |
+| `docs/PROJECT_AGENT_GUIDE.md` | Whole-repo agent map |
+| `edge-ai-fall-detection/` (SHHMHub) | Android original |
+| `hardware_tasks_milestone_1.md` | H1.5.1–H1.5.3 task IDs |
+
+---
+
+## 17. Suggested hardening order (future; not done here)
+
+1. Hysteresis / debounce on near ↔ left (stop edge thrash).  
+2. Hold last confirmed state on low visibility / no pose.  
+3. Align `process_client_frame` event string with landmarks path.  
+4. Tighten fall so “sit outside” ≠ fall without stronger evidence.  
+5. MQTT fall-alert payload (H1.5.3).  
+6. Pi camera soak + reconnect.  
+
+Until then, treat this document as the contract for behavior and math.

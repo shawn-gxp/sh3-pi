@@ -32,6 +32,8 @@
 | `medical_ble_toolkit/SUPPORT_MATRIX.md` | Support levels A–D per device family |
 | `medical_ble_web/README.md` | FastAPI routes |
 | `datasheets/FORA/FORA_FIRST_PARTY_PROTOCOL.md` | FORA/TaiDoc first-party BLE protocol |
+| `docs/FALL_DETECTION.md` | Fall CV design, math, API, reliability (package `fall_detection_pi`) |
+| `fall_detection_pi/README.md` | Short install for fall package |
 | `AGENTS.md` / `CLAUDE.md` | GitNexus workflow hooks |
 
 ---

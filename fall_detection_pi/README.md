@@ -1,54 +1,81 @@
-# fall_detection_pi (standalone)
+# fall_detection_pi
 
-Computer-vision **fall / bed-exit** detection for the SH3 Raspberry Pi hub.
+Standalone **fall / bed-exit** computer vision for the SH3 Raspberry Pi hub.
 
-This package is **intentionally separate** from `sh3-pi` (BLE hub). In **SHHMHub**
-they are siblings:
+This package is **separate from BLE** (`medical_ble_toolkit` / hub pairing). The hub
+web UI optionally imports it.
+
+## Full design documentation
+
+**Read first:** [`docs/FALL_DETECTION.md`](../docs/FALL_DETECTION.md) (in the `sh3-pi` repo)
+or, in the SHHMHub monorepo: `sh3-pi/docs/FALL_DETECTION.md`.
+
+That doc covers:
+
+- Why the package is split from the BLE hub  
+- End-to-end pipeline (camera / phone landmarks / JPEG)  
+- **Equations** (torso center, angle, aspect, ROI, rapid drop, fall paths)  
+- State machine and defaults  
+- HTTP API, config env vars, alert payload  
+- Design history and known reliability limits  
+
+## Layout
+
+### Dev repo (`shawn-gxp/sh3-pi`)
+
+```
+sh3-pi/
+├── fall_detection_pi/     # THIS package
+├── medical_ble_web/
+└── medical_ble_toolkit/
+```
+
+### Monorepo (`gxpindia/SHHMHub`)
 
 ```
 SHHMHub/
-├── fall_detection_pi/     # THIS package (import fall_detection_pi)
-├── sh3-pi/                # BLE hub + medical_ble_web
-├── edge-ai-fall-detection/  # Android Kotlin reference
-├── backend/
-└── …
+├── fall_detection_pi/     # THIS package (sibling)
+├── sh3-pi/                # BLE hub only
+└── edge-ai-fall-detection/
 ```
-
-Do **not** nest this package inside `sh3-pi`.
 
 ## Install
 
 ```bash
-# From SHHMHub (or workspace) root
+# From the directory that *contains* fall_detection_pi/
 pip install -e ./fall_detection_pi
-
-# Or deps only + PYTHONPATH
+# or
 pip install -r fall_detection_pi/requirements.txt
-export PYTHONPATH="$PWD:$PYTHONPATH"   # parent of fall_detection_pi/
+set PYTHONPATH=.
 ```
 
-## Env vars
+Optional: `FALL_DETECTION_HOME=/abs/path/to/fall_detection_pi`
+
+## Quick test (no camera)
+
+```bash
+set PYTHONPATH=.
+python -m pytest fall_detection_pi/tests/test_fall_detector.py -v
+python fall_detection_pi/tests/_tryout_sim.py
+```
+
+## Hub try-out
+
+```bash
+cd medical_ble_web
+set PYTHONPATH=..;.;../..
+python app.py --ssl
+# open https://127.0.0.1:8741/static/fall.html
+```
+
+## Env (short list)
 
 | Variable | Purpose |
 |----------|---------|
-| `FALL_DETECTION_HOME` | Absolute path to this package dir (optional if installed / sibling) |
-| `FALL_HUB_CONFIG` | Path to `hub_config.json` for bed ROI persist |
-| `FALL_PATIENT_ID` | Backend patient id (alerts skipped if unset/placeholder) |
-| `FALL_BACKEND_BASE_URL` | Alert HTTP base URL |
-| `FALL_POSE_MODEL` | `lite` \| `full` \| `heavy` |
-| `FALL_CAMERA_SOURCE` / `RTSP_URL` | Camera index or RTSP URL |
+| `FALL_PATIENT_ID` | Required for HTTP alerts (else skipped) |
+| `FALL_BACKEND_BASE_URL` | Alert API base |
+| `FALL_POSE_MODEL` | `lite` / `full` / `heavy` |
+| `FALL_CAMERA_SOURCE` | OpenCV device index or use `RTSP_URL` |
+| `FALL_HUB_CONFIG` | Path to ROI `hub_config.json` |
 
-## Tests (no camera)
-
-```bash
-cd fall_detection_pi
-# parent must be on PYTHONPATH for `import fall_detection_pi`
-set PYTHONPATH=..
-python -m pytest tests/ -v
-python tests/_tryout_sim.py
-```
-
-## Used by
-
-- `sh3-pi/medical_ble_web` — starts camera loop on hub boot; serves `/api/fall/*` and `/static/fall.html`
-- Android reference: `edge-ai-fall-detection` (Kotlin) in SHHMHub monorepo
+See the full doc for equations and thresholds.
