@@ -65,7 +65,7 @@ Phase 0–1c introduces a clean `DevicePlugin` / registry seam, relocates `omron
 
 - **File:** `medical_ble_toolkit/brands/omron/tests/test_token_unlock.py:9`
 - **Description:** `ROOT = Path(__file__).resolve().parents[2]` was correct-ish when the test lived under `omron_bp/tests/` (landed on `medical_ble_toolkit/`). After the move to `brands/omron/tests/`, `parents[2]` is `medical_ble_toolkit/brands/`, which is not a useful `sys.path` entry for `import medical_ble_toolkit...`. Standalone runs / some pytest path layouts will fail or resolve the wrong tree. Repo-root would be `parents[4]`.
-- **Suggestion:** Point ROOT at the repository root (`parents[4]`) or drop the path hack and rely on package install / pytest `pythonpath`. Re-run the omron unit tests from a clean env to confirm.
+- **Suggestion:** Point ROOT at the repository root (`parents[4]`) or drop the path workaround and rely on package install / pytest `pythonpath`. Re-run the omron unit tests from a clean env to confirm.
 - **Status:** open
 
 ### Issue 5 — Severity: bug

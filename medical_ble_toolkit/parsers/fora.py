@@ -50,7 +50,7 @@ class ForaParser:
 
         raise NotImplementedError(
             "FORA parser is not yet implemented. "
-            "Please collect hex logs and reverse engineer the protocol."
+            "Please collect hex logs and analyze the communication protocol."
         )
 
     def parse_or_raw(self, payload: bytes | bytearray) -> dict[str, Any]:

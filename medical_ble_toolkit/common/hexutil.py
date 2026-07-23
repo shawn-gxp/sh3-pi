@@ -1,4 +1,4 @@
-"""Forensic hex dumps and millisecond timestamps for reverse engineering."""
+"""Forensic hex dumps and millisecond timestamps for protocol analysis."""
 
 from __future__ import annotations
 

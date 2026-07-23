@@ -68,7 +68,7 @@ A single naive “connect and subscribe” path **will fail** on A&D (5-second a
 | Masimo MightySat | High | Yes |
 | NT-100B Thermometer (TICD) | High (app-layer serial) | Yes (BLE transport + serial framing) |
 | SIG HTP | High (profile reference) | Yes as generic thermometer collector |
-| Nipro Cocoron ECG | Medium (behavior/design; UUID/payload IF external) | Partial — need interface workbook or sniffer |
+| Nipro Cocoron ECG | Medium (behavior/design; UUID/payload IF external) | Partial — need interface workbook or protocol logs |
 | FORA 6 Connect | None (brochure) | **No** — blocked |
 
 ---

@@ -280,7 +280,7 @@ python -m medical_ble_toolkit.tests.test_parsers
 
 ---
 
-## Reverse Engineering Guide
+## Protocol Analysis Guide
 
 ### Where to look in the terminal
 

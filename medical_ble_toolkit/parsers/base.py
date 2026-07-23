@@ -37,7 +37,7 @@ def parse_dispatch(
 ) -> Any:
     """
     Try each parser until one accepts the payload.
-    Useful during reverse engineering when UUID ownership is still unknown.
+    Useful during protocol analysis when UUID ownership is still unknown.
     """
     if parsers is None:
         parsers = []

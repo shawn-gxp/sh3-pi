@@ -426,7 +426,7 @@ class MedicalBleClient:
         # ------------------------------------------------------------------
         # Format: "0x0A 0x1B 0xFF"  (zero-padded, space-separated)
         #
-        # HOW TO USE THIS LOG DURING REVERSE ENGINEERING
+        # HOW TO USE THIS LOG DURING PROTOCOL ANALYSIS
         # -----------------------------------------------
         # 1. Leave the medical device idle; note any baseline [HEX] traffic.
         # 2. Perform ONE physical action (finish BP, press M1, insert strip,

@@ -277,7 +277,7 @@ class MultiParameterReading:
     brand: DeviceBrand = DeviceBrand.FORA
     model: str = "FORA 6 Connect"
     raw_hex: str = ""
-    notes: str = "Protocol not documented — populate via reverse engineering"
+    notes: str = "Protocol not documented — populate via packet analysis"
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
