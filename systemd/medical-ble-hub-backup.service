@@ -6,4 +6,4 @@ Type=oneshot
 User=sh3
 Group=sh3
 WorkingDirectory=/home/sh3/Desktop/sh3-hw-layer-experiments
-ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/hub_db_backup.sh
+ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/scripts/deploy/hub_db_backup.sh

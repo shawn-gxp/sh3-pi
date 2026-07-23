@@ -7,4 +7,4 @@ Type=oneshot
 User=root
 Environment=PORT=8741
 Environment=MEDICAL_HUB_UNIT=medical-ble-hub.service
-ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/hub_watchdog.sh
+ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/scripts/deploy/hub_watchdog.sh
