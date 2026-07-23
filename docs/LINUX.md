@@ -43,6 +43,21 @@ chmod +x scripts/deploy/setup_linux.sh scripts/dev/run_web.sh scripts/dev/run_to
 ./scripts/deploy/setup_linux.sh
 ```
 
+## Camera & Fall Detection Setup
+
+For Raspberry Pi fallback video processing:
+
+```bash
+# 1. Install OS dependencies for Video4Linux
+sudo apt install -y libcamera-dev v4l-utils
+
+# 2. Install ML and vision libraries
+.venv/bin/pip install mediapipe>=0.10.0 opencv-python-headless>=4.8.0
+
+# 3. Verify camera device exists
+ls /dev/video*
+```
+
 ## Run — Web UI (recommended)
 
 ```bash

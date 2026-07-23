@@ -76,6 +76,14 @@ async def lifespan(app: FastAPI):
             log.info("No paired devices yet — pair a device to begin.")
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not auto-start daemon: %s", exc)
+    try:
+        import threading
+        from fall_detection import camera_loop
+        thread = threading.Thread(target=camera_loop.run, daemon=True)
+        thread.start()
+        log.info("Fall detection camera loop started in background")
+    except Exception as exc:
+        log.warning("Could not start fall detection: %s", exc)
 
     yield
 
