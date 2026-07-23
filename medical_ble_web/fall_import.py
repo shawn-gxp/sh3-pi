@@ -1,18 +1,23 @@
 """
 Resolve the standalone `fall_detection_pi` package.
 
-**Supported layout (sibling only):**
+Canonical layouts (never inside medical_ble_web/ or brands/):
 
+  SHHMHub monorepo (preferred product layout):
     workspace/
-      fall_detection_pi/     # this package
-      sh3-pi/                # BLE hub (this file lives under medical_ble_web/)
+      fall_detection_pi/          # sibling of hub folder
+      sh3-pi/medical_ble_web/     # this file
+
+  Flat multi-package checkout (e.g. some local trees):
+    hub_root/
+      fall_detection_pi/          # sibling of medical_ble_web
+      medical_ble_web/
 
 Search order:
-  1. Already importable (pip install -e ./fall_detection_pi from workspace root)
-  2. FALL_DETECTION_HOME / FALL_DETECTION_PATH → absolute path to package dir
-  3. Sibling of sh3-pi:  <workspace>/fall_detection_pi
-
-Nested under sh3-pi is not supported for new deployments.
+  1. Already importable (pip install -e …)
+  2. FALL_DETECTION_HOME / FALL_DETECTION_PATH
+  3. Sibling of hub folder:  parent(sh3-pi)/fall_detection_pi   ← monorepo
+  4. Sibling of medical_ble_web:  hub_root/fall_detection_pi   ← flat checkout
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ from typing import Optional
 
 log = logging.getLogger("medical_ble_web.fall_import")
 
-# medical_ble_web/ → sh3-pi/  (hub root)
+# medical_ble_web/ → hub package root (sh3-pi/ in monorepo, or repo root in flat layout)
 _SH3_ROOT = Path(__file__).resolve().parent.parent
 
 _PKG_NAME = "fall_detection_pi"
@@ -47,7 +52,7 @@ def _add_parent_of_package(package_dir: Path) -> None:
 
 
 def ensure_fall_detection() -> bool:
-    """Make `import fall_detection_pi` work (sibling layout)."""
+    """Make `import fall_detection_pi` work."""
     if _try_import():
         return True
 
@@ -57,8 +62,10 @@ def ensure_fall_detection() -> bool:
         if raw:
             candidates.append(Path(raw).expanduser())
 
-    # Sibling of sh3-pi only
+    # Monorepo: SHHMHub/fall_detection_pi next to SHHMHub/sh3-pi/
     candidates.append(_SH3_ROOT.parent / _PKG_NAME)
+    # Flat hub root: package next to medical_ble_web/
+    candidates.append(_SH3_ROOT / _PKG_NAME)
 
     for cand in candidates:
         try:
@@ -71,7 +78,7 @@ def ensure_fall_detection() -> bool:
             continue
         _add_parent_of_package(root)
         if _try_import():
-            log.info("Using fall package from %s (sibling layout)", root)
+            log.info("Using fall package from %s", root)
             return True
 
     return False

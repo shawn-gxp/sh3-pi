@@ -54,12 +54,13 @@ How the hub finds the package (`medical_ble_web/fall_import.py`):
 
 1. Already on `PYTHONPATH` / `pip install -e ./fall_detection_pi`
 2. `FALL_DETECTION_HOME` env → absolute path to the package directory
-3. **Sibling of `sh3-pi`:** `<workspace>/fall_detection_pi`  
-   (i.e. parent of the hub root + `/fall_detection_pi`)
+3. **Sibling of the hub folder (SHHMHub):** `<workspace>/fall_detection_pi`  
+   next to `<workspace>/sh3-pi/`
+4. **Flat multi-package root only:** `<hub_root>/fall_detection_pi` next to  
+   `medical_ble_web/` (when the git root *is* the hub root — not used in SHHMHub)
 
-**Do not** put the package at `sh3-pi/fall_detection_pi/` or `sh3-pi/fall_detection/`.
-That nested layout is **unsupported** for SHHMHub and for new work.
-
+**SHHMHub rule:** package lives at monorepo root as a **sibling of `sh3-pi/`**.  
+Never under `sh3-pi/fall_detection_pi/` or `sh3-pi/fall_detection/`.
 ### Why split (and keep sibling)
 | Reason | Detail |
 |--------|--------|
