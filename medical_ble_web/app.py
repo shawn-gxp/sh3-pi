@@ -44,13 +44,6 @@ from ble_jobs import (  # noqa: E402
     subscribe_live,
     unsubscribe_live,
 )
-from fall_import import (  # noqa: E402
-    ensure_fall_detection,
-    fall_detection_location,
-    import_camera_loop,
-    import_fall_config,
-)
-
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)-7s %(name)s  %(message)s",
@@ -82,31 +75,14 @@ async def lifespan(app: FastAPI):
             log.info("No paired devices yet — pair a device to begin.")
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not auto-start daemon: %s", exc)
-    # Fall detection is a *sibling* package fall_detection_pi (not inside sh3-pi)
-    if ensure_fall_detection():
-        try:
-            import threading
-
-            camera_loop = import_camera_loop()
-            thread = threading.Thread(target=camera_loop.run, daemon=True)
-            thread.start()
-            log.info("Fall detection (fall_detection_pi) camera loop started")
-        except Exception as exc:
-            log.warning("Could not start fall detection: %s", exc)
-    else:
-        log.warning(
-            "fall_detection_pi package not found — install sibling package "
-            "(pip install -e ../fall_detection_pi) or set FALL_DETECTION_HOME. "
-            "Hub BLE features still work; /api/fall/* will error until installed."
-        )
+    # Fall detection runs as a *separate process* (fall_detection_pi.web_server).
+    # Default URL for UI link: FALL_SERVICE_URL or https://<host>:8742
+    log.info(
+        "Fall service is independent — start with: "
+        "python -m fall_detection_pi.web_server --ssl  (default port 8742)"
+    )
 
     yield
-
-    try:
-        if ensure_fall_detection():
-            import_camera_loop().stop()
-    except Exception:
-        pass
 
     try:
         import mqtt_bridge
@@ -164,116 +140,8 @@ class PatientSetting(BaseModel):
     patient_id: str
 
 
-# ---------------------------------------------------------------------------
-# Fall Detection API Routes (optional sibling package)
-# ---------------------------------------------------------------------------
-
-from fastapi.responses import StreamingResponse
-from fastapi import Request
-
-
-def _require_fall():
-    if not ensure_fall_detection():
-        raise HTTPException(
-            503,
-            "fall_detection_pi package not installed. "
-            "pip install -e ../fall_detection_pi or set FALL_DETECTION_HOME",
-        )
-
-
-@app.get("/api/fall/stream")
-async def fall_stream():
-    """Live MJPEG stream of the camera feed with pose overlay."""
-    _require_fall()
-    camera_loop = import_camera_loop()
-
-    def generate():
-        import time
-
-        while True:
-            jpeg = camera_loop.get_latest_jpeg()
-            if jpeg:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                )
-            time.sleep(0.04)  # ~25 FPS
-
-    return StreamingResponse(
-        generate(), media_type="multipart/x-mixed-replace; boundary=frame"
-    )
-
-
-@app.get("/api/fall/roi")
-async def fall_roi_get() -> Dict[str, Any]:
-    """Get the current bed boundary polygon."""
-    _require_fall()
-    return {"ok": True, "polygon": import_camera_loop().get_active_polygon()}
-
-
-class PolygonBody(BaseModel):
-    polygon: List[Dict[str, float]]
-
-
-@app.post("/api/fall/roi")
-async def fall_roi_post(body: PolygonBody) -> Dict[str, Any]:
-    """Set the bed boundary polygon (expects ≥3 points, normalized 0.0-1.0)."""
-    _require_fall()
-    if len(body.polygon) < 3:
-        raise HTTPException(400, "Polygon must have at least 3 points")
-
-    new_polygon = [(pt["x"], pt["y"]) for pt in body.polygon]
-    import_camera_loop().update_polygon(new_polygon)
-
-    try:
-        import json
-
-        cfg_path = import_fall_config().hub_config_path()
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.is_file() else {}
-        # hub_config key stays fall_detection for existing configs
-        if "fall_detection" not in cfg:
-            cfg["fall_detection"] = {}
-        cfg["fall_detection"]["polygon"] = new_polygon
-        cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    except Exception as exc:
-        log.warning("Could not persist ROI to hub_config.json: %s", exc)
-
-    return {"ok": True, "polygon": new_polygon}
-
-
-@app.post("/api/fall/frame")
-async def fall_frame_post(request: Request) -> Dict[str, Any]:
-    """Receives a JPEG frame uploaded from browser/phone camera and runs fall detection."""
-    _require_fall()
-    data = await request.body()
-    if not data:
-        raise HTTPException(400, "Empty image body")
-    return import_camera_loop().process_client_frame(data)
-
-
-class LandmarksBody(BaseModel):
-    landmarks: Any
-
-
-@app.post("/api/fall/landmarks")
-async def fall_landmarks_post(body: LandmarksBody) -> Dict[str, Any]:
-    """Receives normalized skeletal landmark points and evaluates fall detection."""
-    _require_fall()
-    return import_camera_loop().process_normalized_landmarks(body.landmarks)
-
-
-@app.get("/api/fall/status")
-async def fall_status() -> Dict[str, Any]:
-    """Whether the sibling fall_detection_pi package is available."""
-    ok = ensure_fall_detection()
-    p = fall_detection_location() if ok else None
-    return {
-        "ok": ok,
-        "package": "fall_detection_pi",
-        "package_path": str(p) if p else None,
-        "separate_package": True,
-    }
+# Fall detection is a separate process: python -m fall_detection_pi.web_server
+# (default https://0.0.0.0:8742). No fall routes on the BLE hub.
 
 # ---------------------------------------------------------------------------
 # Standard Web UI Routes

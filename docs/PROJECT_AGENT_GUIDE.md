@@ -211,9 +211,9 @@ Companion app on phone ↔ real device
 ## 5. Runtime HAL — `medical_ble_toolkit/`
 
 **Role:** Standalone multi-brand BLE hardware layer.  
-**Rule:** `medical_ble_web` depends on this toolkit for BLE. Fall CV is an optional
-**sibling** package `fall_detection_pi` (resolved by `fall_import.py`), never nested
-inside this tree.
+**Rule:** `medical_ble_web` depends on this toolkit for BLE. Fall CV is a **separate
+process** (`python -m fall_detection_pi.web_server` on :8742). Package is a sibling of
+`sh3-pi/` in SHHMHub; BLE hub has no fall routes.
 
 ### 5.1 Package entrypoints (top level)
 

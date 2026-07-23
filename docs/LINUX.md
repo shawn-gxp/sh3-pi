@@ -51,19 +51,23 @@ For Raspberry Pi fallback video processing:
 # 1. Install OS dependencies for Video4Linux
 sudo apt install -y libcamera-dev v4l-utils
 
-# 2. Fall detection is a *sibling* package (not inside sh3-pi):
+# 2. Fall detection is a *sibling* package + *separate process*:
 #    workspace/
-#      fall_detection_pi/
-#      sh3-pi/
-#    Install into the hub venv:
-.venv/bin/pip install -e ../fall_detection_pi
+#      fall_detection_pi/     # port 8742
+#      sh3-pi/                # BLE hub port 8741
+.venv/bin/pip install -r ../fall_detection_pi/requirements.txt
 #    (mediapipe Tasks API; do NOT also install opencv-python-headless)
 
-# 3. First pose run auto-downloads pose_landmarker_lite.task into
-#    fall_detection_pi/models/ (or set FALL_POSE_MODEL_PATH / FALL_POSE_MODEL=full|heavy)
-#    Optional: export FALL_DETECTION_HOME=/abs/path/to/fall_detection_pi
+# 3. Run two servers (example):
+#    Terminal A — BLE hub:
+#      cd sh3-pi/medical_ble_web && PYTHONPATH=..:. python app.py --ssl
+#    Terminal B — Fall:
+#      cd workspace && PYTHONPATH=. python -m fall_detection_pi.web_server --ssl
 
-# 4. Verify camera device exists
+# 4. First pose run auto-downloads pose_landmarker_lite.task into
+#    fall_detection_pi/models/
+
+# 5. Verify camera device exists
 ls /dev/video*
 ```
 

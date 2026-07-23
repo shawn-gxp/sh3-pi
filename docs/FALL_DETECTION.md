@@ -1,14 +1,17 @@
 # Fall Detection — Design, Math, and Operations
 
-**Status:** Lab-validated prototype (phone landmarks + hub rules)  
-**Package:** `fall_detection_pi` (standalone; not nested under BLE-only code)  
-**Hub consumer:** `medical_ble_web` (optional)  
+**Status:** Lab-validated prototype (phone landmarks + fall service rules)  
+**Package:** `fall_detection_pi` (standalone HTTP service on port **8742**)  
+**BLE hub:** `medical_ble_web` on port **8741** — devices only; links to fall UI  
 **Android lineage:** `edge-ai-fall-detection` (Kotlin MediaPipe / ROI rules)  
 **Last updated:** 2026-07-23  
 
 This document explains **what we built**, **why**, the **equations**, state machine,
 APIs, config, and **known reliability limits**. It is the source of truth before further
 hardening or MQTT work.
+
+**Process model:** BLE and fall are **two independent servers**. Fall math/rules live only
+in `fall_detection_pi`; the BLE hub does **not** import or host fall routes.
 
 ---
 
@@ -36,39 +39,42 @@ Fall detection is **not** inside the BLE tree. The **only supported layout** is
 
 ```
 workspace/   (e.g. SHHMHub/ clone root)
-├── fall_detection_pi/           # CV package  →  import fall_detection_pi
-├── sh3-pi/                      # BLE hub only
-│   ├── medical_ble_web/         # FastAPI + fall_import + /api/fall/*
+├── fall_detection_pi/           # CV package + web_server (:8742)
+│   ├── fall_detector.py         # pure rules (no HTTP)
+│   ├── camera_loop.py
+│   ├── web_server.py            # FastAPI /api/fall/* + static/fall.html
+│   └── static/fall.html
+├── sh3-pi/                      # BLE hub only (:8741)
+│   ├── medical_ble_web/         # FastAPI devices; link to :8742
 │   ├── medical_ble_toolkit/
-│   └── docs/FALL_DETECTION.md   # this file
+│   └── docs/FALL_DETECTION.md   # this file (also mirrored in shawn-gxp/sh3-pi)
 ├── edge-ai-fall-detection/      # Android Kotlin reference (SHHMHub)
 └── …
 ```
 
 | Path | Role |
 |------|------|
-| `fall_detection_pi/` | All pose / fall rules / camera loop |
-| `sh3-pi/` | BLE, SQLite, MQTT, web UI — **no** fall package folder inside |
+| `fall_detection_pi/` | All pose / fall rules / camera loop / **own HTTP server** |
+| `sh3-pi/` | BLE, SQLite, MQTT, device web UI — **no** fall API routes |
 
-How the hub finds the package (`medical_ble_web/fall_import.py`):
+**Two remotes:**
 
-1. Already on `PYTHONPATH` / `pip install -e ./fall_detection_pi`
-2. `FALL_DETECTION_HOME` env → absolute path to the package directory
-3. **Sibling of the hub folder (SHHMHub):** `<workspace>/fall_detection_pi`  
-   next to `<workspace>/sh3-pi/`
-4. **Flat multi-package root only:** `<hub_root>/fall_detection_pi` next to  
-   `medical_ble_web/` (when the git root *is* the hub root — not used in SHHMHub)
+| Remote | Layout |
+|--------|--------|
+| **SHHMHub** monorepo | `fall_detection_pi/` **sibling** of `sh3-pi/` |
+| **shawn-gxp/sh3-pi** | `fall_detection_pi/` lives **inside** the hub git root (same package code) |
 
-**SHHMHub rule:** package lives at monorepo root as a **sibling of `sh3-pi/`**.  
-Never under `sh3-pi/fall_detection_pi/` or `sh3-pi/fall_detection/`.
-### Why split (and keep sibling)
+**SHHMHub rule:** package at monorepo root as a **sibling of `sh3-pi/`**.  
+Never nested as `sh3-pi/fall_detection_pi/` inside the monorepo tree.
+
+### Why two processes (and sibling package)
 | Reason | Detail |
 |--------|--------|
-| Ownership | Fall CV vs multi-brand BLE evolve at different rates |
+| Independence | Crash/restart fall without killing BLE collection |
 | Deploy | Hub can run BLE without MediaPipe installed |
-| Clear imports | `import fall_detection_pi` vs toolkit brands |
-| Milestone mapping | Aligns with H1.5.x fall tasks vs H1.1–H1.4 BLE |
-| Monorepo clarity | SHHMHub top-level folders are product modules |
+| Ownership | Fall CV vs multi-brand BLE evolve at different rates |
+| Clear APIs | Fall routes only on `:8742`; BLE routes only on `:8741` |
+| Milestone mapping | H1.5.x fall vs H1.1–H1.4 BLE |
 ---
 
 ## 3. End-to-end pipeline
@@ -106,11 +112,11 @@ Never under `sh3-pi/fall_detection_pi/` or `sh3-pi/fall_detection/`.
 
 ### Input modes
 
-| Mode | Who runs pose? | API | Landmarker mode |
-|------|----------------|-----|-----------------|
-| Local camera thread | Hub | background `camera_loop.run()` | **VIDEO** |
-| Browser JPEG upload | Hub | `POST /api/fall/frame` | **IMAGE** |
-| Browser landmarks | Phone (MediaPipe JS) | `POST /api/fall/landmarks` | none on hub |
+| Mode | Who runs pose? | API (fall service :8742) | Landmarker mode |
+|------|----------------|--------------------------|-----------------|
+| Local camera thread | Fall service | background `camera_loop.run()` | **VIDEO** |
+| Browser JPEG upload | Fall service | `POST /api/fall/frame` | **IMAGE** |
+| Browser landmarks | Phone (MediaPipe JS) | `POST /api/fall/landmarks` | none on host |
 
 **Lab result:** landmarks mode is the most reliable on Windows (no local camera required).
 
@@ -329,30 +335,34 @@ Priority order in code:
 
 | Module | Responsibility |
 |--------|----------------|
-| `fall_detection_pi/fall_detector.py` | Pure rules: ROI, posture, velocity, state |
+| `fall_detection_pi/fall_detector.py` | Pure rules: ROI, posture, velocity, state (**no math change in this split**) |
 | `fall_detection_pi/camera_loop.py` | Camera / frame / landmarks I/O, landmarker, overlays, alarms |
 | `fall_detection_pi/pose_model.py` | Download/cache `.task` model |
 | `fall_detection_pi/config.py` | Env + hub_config ROI load/save path |
 | `fall_detection_pi/alert_api.py` | Async HTTP POST to backend |
-| `medical_ble_web/fall_import.py` | Locate **sibling** package `fall_detection_pi` |
-| `medical_ble_web/app.py` | Lifespan camera thread + `/api/fall/*` |
-| `medical_ble_web/static/fall.html` | ROI draw + phone pose + status banner |
+| `fall_detection_pi/web_server.py` | **Independent** FastAPI app: lifespan camera thread + `/api/fall/*` |
+| `fall_detection_pi/static/fall.html` | ROI draw + phone pose + status banner |
+| `medical_ble_web/app.py` | BLE hub only (no fall routes; log points to fall service) |
+| `medical_ble_web/static/fall.html` | Short redirect to `https://<host>:8742/` |
+| `medical_ble_web/static/index.html` | Link “Fall Detection (port 8742)” |
 
 ---
 
-## 8. HTTP API (hub)
+## 8. HTTP API (fall service only — port **8742**)
+
+All fall routes are served by `python -m fall_detection_pi.web_server`.  
+The BLE hub (`:8741`) does **not** expose these paths.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/fall/status` | Package found? path? |
+| `GET` | `/health` | Service ok, have_cv2 / have_pose |
+| `GET` | `/api/fall/status` | Service id, package path, port |
 | `GET` | `/api/fall/roi` | Current bed polygon |
 | `POST` | `/api/fall/roi` | Set polygon + persist `hub_config.json` |
 | `POST` | `/api/fall/landmarks` | Evaluate pose JSON (preferred for phone) |
-| `POST` | `/api/fall/frame` | JPEG → hub PoseLandmarker |
+| `POST` | `/api/fall/frame` | JPEG → PoseLandmarker |
 | `GET` | `/api/fall/stream` | MJPEG last processed frame |
-| UI | `/static/fall.html` | Calibration + monitoring |
-
-If package missing → **503** on fall routes (BLE hub still runs).
+| UI | `/` or `/static/fall.html` | Calibration + monitoring |
 
 ### Landmarks body shapes
 1. **Named dict** (tests / simple clients):
@@ -406,6 +416,9 @@ If package missing → **503** on fall routes (BLE hub still runs).
 | `FALL_POSE_MODEL` | `lite` | `lite` \| `full` \| `heavy` |
 | `FALL_POSE_MODEL_PATH` | package `models/…` | Local `.task` file |
 | `FALL_HUB_CONFIG` | auto-search | Path to `hub_config.json` |
+| `FALL_PORT` / `PORT` | `8742` | Fall HTTP listen port |
+| `FALL_HOST` / `HOST` | `0.0.0.0` | Fall HTTP bind address |
+| `USE_SSL` / `--ssl` | off | HTTPS (self-signed cert auto-created) |
 | `FALL_MIN_DET_CONF` / `_TRACK_` / `_PRES_` | `0.5` | PoseLandmarker thresholds |
 
 ### Detector defaults (code)
@@ -487,10 +500,13 @@ Default patient id → **skip publish** (log warning only).
 
 ---
 
-## 12. How to run (development)
+## 12. How to run (two independent servers)
 
-Assume **sibling** layout. All commands from the **workspace root** (folder that
-contains both `fall_detection_pi/` and `sh3-pi/`), e.g. the SHHMHub clone root.
+**BLE hub and fall detection are separate processes.** No shared process, no fall
+routes on the BLE app.
+
+Assume **sibling** layout. Commands from the **workspace root** (folder that
+contains both `fall_detection_pi/` and `sh3-pi/`).
 
 ### Install
 
@@ -502,32 +518,40 @@ source .venv/bin/activate   # Linux/Pi
 
 pip install -r sh3-pi/requirements.txt
 pip install -r sh3-pi/medical_ble_web/requirements.txt
-pip install -e ./fall_detection_pi
-# or: pip install -r fall_detection_pi/requirements.txt
+pip install -r fall_detection_pi/requirements.txt
+# or: pip install -e ./fall_detection_pi
 ```
 
 ### Unit tests (no camera)
 
 ```bash
-# Workspace root — parent of fall_detection_pi must be on PYTHONPATH
 set PYTHONPATH=.
 python -m pytest fall_detection_pi/tests/test_fall_detector.py -v
 python fall_detection_pi/tests/_tryout_sim.py
 ```
 
-### Hub + SSL
+### Server 1 — BLE hub (port **8741**)
 
 ```bash
 cd sh3-pi/medical_ble_web
-# so fall_import can resolve ../../fall_detection_pi and import hub modules
-set PYTHONPATH=..;.;../..
+set PYTHONPATH=..;.
 python app.py --ssl
+# https://127.0.0.1:8741/   — pair/sync devices only
 ```
 
-- UI: `https://127.0.0.1:8741/static/fall.html`  
-- Status: `GET /api/fall/status` → `"package": "fall_detection_pi"` and a path  
-  ending in `…/fall_detection_pi` (sibling of `sh3-pi`, not under it).  
+### Server 2 — Fall detection (port **8742**)
 
+```bash
+# Workspace root (parent of fall_detection_pi)
+set PYTHONPATH=.
+python -m fall_detection_pi.web_server --ssl
+# https://127.0.0.1:8742/            — fall UI
+# https://127.0.0.1:8742/api/fall/status
+```
+
+Override: `FALL_PORT=8742`, `FALL_HOST=0.0.0.0`.
+
+The BLE hub index page links to the fall service on port 8742 (same hostname).
 ### Enable backend alerts
 
 ```bash

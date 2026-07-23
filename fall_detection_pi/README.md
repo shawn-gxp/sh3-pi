@@ -14,9 +14,9 @@ That doc covers equations, state machine, API, config, design history, and limit
 
 ```
 SHHMHub/   (or any workspace root)
-├── fall_detection_pi/     # THIS package  →  import fall_detection_pi
-├── sh3-pi/                # BLE hub only (medical_ble_web, toolkit, …)
-│   └── medical_ble_web/   # optional consumer via fall_import.py
+├── fall_detection_pi/     # THIS package + web_server on :8742
+├── sh3-pi/                # BLE hub only on :8741 (medical_ble_web, toolkit, …)
+│   └── medical_ble_web/   # device UI; links out to fall service
 └── edge-ai-fall-detection/
 ```
 
@@ -45,15 +45,23 @@ python -m pytest fall_detection_pi/tests/test_fall_detector.py -v
 python fall_detection_pi/tests/_tryout_sim.py
 ```
 
-## Hub try-out
+## Run fall service (independent of BLE hub)
 
 ```bash
-# workspace root
+# workspace root (sibling of sh3-pi)
+set PYTHONPATH=.
+python -m fall_detection_pi.web_server --ssl
+# UI:     https://127.0.0.1:8742/
+# Status: https://127.0.0.1:8742/api/fall/status
+```
+
+BLE hub (optional, separate terminal):
+
+```bash
 cd sh3-pi/medical_ble_web
-set PYTHONPATH=..;.;../..
+set PYTHONPATH=..;.
 python app.py --ssl
-# open https://127.0.0.1:8741/static/fall.html
-# GET /api/fall/status → package_path should be …/fall_detection_pi (sibling)
+# https://127.0.0.1:8741/  — devices only; links to fall on :8742
 ```
 
 ## Env (short list)

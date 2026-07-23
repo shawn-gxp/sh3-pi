@@ -245,7 +245,18 @@
   <header>
     <h1>Medical BLE Hub</h1>
     <div style="display: flex; gap: 0.5rem; align-items: center;">
-      <a href="/static/fall.html" style="color: var(--accent); font-weight: 600; text-decoration: none; margin-right: 1rem; padding: 0.2rem 0.5rem; border: 1px solid var(--accent); border-radius: 4px;">📹 Fall Detection Calibration</a>
+      <a id="fallServiceLink" href="https://127.0.0.1:8742/" target="_blank" rel="noopener" style="color: var(--accent); font-weight: 600; text-decoration: none; margin-right: 1rem; padding: 0.2rem 0.5rem; border: 1px solid var(--accent); border-radius: 4px;">📹 Fall Detection (port 8742)</a>
+      <script>
+        (function () {
+          // Prefer same hostname as hub UI; fall service is a separate process.
+          var a = document.getElementById('fallServiceLink');
+          if (!a) return;
+          var host = location.hostname || '127.0.0.1';
+          var port = 8742;
+          var proto = location.protocol === 'https:' ? 'https:' : 'http:';
+          a.href = proto + '//' + host + ':' + port + '/';
+        })();
+      </script>
       <span class="badge" id="mqttBadge">MQTT: checking...</span>
       <span class="badge" id="wsBadge">WS: connecting...</span>
     </div>
