@@ -8,7 +8,9 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# scripts/deploy → repo root
+ROOT="$(cd "$_here/../.." && pwd)"
 UNIT_DIR=/etc/systemd/system
 HUB_USER="${SUDO_USER:-sh3}"
 HUB_HOME="$(getent passwd "$HUB_USER" | cut -d: -f6)"
@@ -18,10 +20,9 @@ if [[ -z "$HUB_HOME" ]]; then
   exit 1
 fi
 
-# Prefer repo next to this script (not always under Desktop after move)
 REPO="$ROOT"
 if [[ ! -x "$REPO/.venv/bin/python" ]]; then
-  echo "ERROR: venv missing at $REPO/.venv — run ./setup_linux.sh as $HUB_USER first"
+  echo "ERROR: venv missing at $REPO/.venv — run ./scripts/deploy/setup_linux.sh as $HUB_USER first"
   exit 1
 fi
 
@@ -54,17 +55,24 @@ if [[ -f /etc/bluetooth/main.conf ]]; then
 fi
 
 # Optional BlueZ hub tweaks (non-fatal)
-if [[ -x "$REPO/setup_bluez_hub.sh" ]]; then
-  bash "$REPO/setup_bluez_hub.sh" || true
+if [[ -x "$REPO/scripts/deploy/setup_bluez_hub.sh" ]]; then
+  bash "$REPO/scripts/deploy/setup_bluez_hub.sh" || true
 fi
 
 chmod +x \
-  "$REPO/hub_prestart.sh" \
-  "$REPO/hub_watchdog.sh" \
-  "$REPO/hub_open_ui.sh" \
-  "$REPO/start_hub.sh" \
-  "$REPO/run_web.sh" \
-  "$REPO/hub_db_backup.sh"
+  "$REPO/scripts/deploy/hub_prestart.sh" \
+  "$REPO/scripts/deploy/hub_watchdog.sh" \
+  "$REPO/scripts/deploy/hub_open_ui.sh" \
+  "$REPO/scripts/deploy/start_hub.sh" \
+  "$REPO/scripts/deploy/hub_db_backup.sh" \
+  "$REPO/scripts/dev/run_web.sh" \
+  "$REPO/scripts/dev/run_toolkit.sh" \
+  "$REPO"/hub_prestart.sh \
+  "$REPO"/hub_watchdog.sh \
+  "$REPO"/hub_open_ui.sh \
+  "$REPO"/start_hub.sh \
+  "$REPO"/run_web.sh \
+  "$REPO"/hub_db_backup.sh 2>/dev/null || true
 
 # --- Render unit files with absolute paths / correct user ---
 render_unit() {
@@ -142,8 +150,8 @@ echo ""
 echo "  On-screen UI:"
 echo "    • Autostart desktop file + medical-ble-hub-ui.service"
 echo "    • Needs a GUI session (auto-login recommended)"
-echo "    • Manual test:  ./hub_open_ui.sh"
-echo "    • Windowed (not kiosk):  HUB_UI_KIOSK=0 ./hub_open_ui.sh"
+echo "    • Manual test:  ./scripts/deploy/hub_open_ui.sh"
+echo "    • Windowed (not kiosk):  HUB_UI_KIOSK=0 ./scripts/deploy/hub_open_ui.sh"
 echo ""
 echo "  Useful commands:"
 echo "    sudo systemctl status medical-ble-hub"

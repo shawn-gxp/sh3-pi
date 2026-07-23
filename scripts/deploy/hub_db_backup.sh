@@ -2,7 +2,8 @@
 # Rolling SQLite database backup for medical BLE hub
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$_here/../.." && pwd)"
 DB_PATH="$ROOT/medical_ble_web/data/poc.db"
 BAK1="$DB_PATH.bak1"
 BAK2="$DB_PATH.bak2"

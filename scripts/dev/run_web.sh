@@ -2,7 +2,9 @@
 # Linux launcher for Medical BLE Web (Pi hub / LAN access)
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# scripts/dev → repo root
+ROOT="$(cd "$_here/../.." && pwd)"
 WEB="$ROOT/medical_ble_web"
 PORT="${PORT:-8741}"
 # Pi appliance: reachable from phone on same WiFi. Override: HOST=127.0.0.1
@@ -12,7 +14,7 @@ SKIP_INSTALL="${SKIP_INSTALL:-0}"
 
 if [[ ! -x "$VENV/bin/python" ]]; then
   echo "ERROR: venv missing at $VENV"
-  echo "Run:  ./setup_linux.sh"
+  echo "Run:  ./scripts/deploy/setup_linux.sh"
   exit 1
 fi
 

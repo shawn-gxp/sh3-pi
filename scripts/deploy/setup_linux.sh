@@ -2,7 +2,8 @@
 # Bootstrap Medical BLE toolkit on Linux (BlueZ).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$_here/../.." && pwd)"
 cd "$ROOT"
 
 echo "============================================================"
@@ -53,6 +54,7 @@ echo "Parser self-test…"
 
 echo ""
 echo "OK. Next:"
-echo "  ./run_web.sh                 # http://127.0.0.1:8741"
-echo "  ./run_toolkit.sh             # interactive CLI"
-echo "  See LINUX.md for Omron pair/read and troubleshooting."
+echo "  ./scripts/dev/run_web.sh        # http://0.0.0.0:8741"
+echo "  ./scripts/deploy/start_hub.sh   # BLE power + web hub"
+echo "  ./scripts/dev/run_toolkit.sh    # interactive CLI"
+echo "  See docs/LINUX.md for Omron pair/read and troubleshooting."

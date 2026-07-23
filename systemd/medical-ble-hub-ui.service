@@ -17,7 +17,7 @@ Environment=PORT=8741
 Environment=HUB_UI_KIOSK=1
 Environment=HUB_UI_WAIT_S=120
 WorkingDirectory=/home/sh3/Desktop/sh3-hw-layer-experiments
-ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/hub_open_ui.sh
+ExecStart=/home/sh3/Desktop/sh3-hw-layer-experiments/scripts/deploy/hub_open_ui.sh
 RemainAfterExit=yes
 # Do not tear down the whole stack if browser fails
 SuccessExitStatus=0 1
