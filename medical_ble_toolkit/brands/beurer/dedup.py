@@ -4,8 +4,11 @@ Deduplicate BP / glucose readings (companion BPMeasurementsFilterAndSaveRepo sty
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Iterable, List, Optional, Set, Tuple
+
+log = logging.getLogger(__name__)
 
 
 def bp_dedup_key(reading: Any) -> Optional[str]:
@@ -20,7 +23,8 @@ def bp_dedup_key(reading: Any) -> Optional[str]:
         if sys is None and dia is None:
             return None
         return f"{ts_s}|{sys}|{dia}|{pulse}|{user}"
-    except Exception:
+    except Exception as exc:
+        log.error("bp_dedup_key error: %s", exc)
         return None
 
 
@@ -33,7 +37,8 @@ def glucose_dedup_key(reading: Any) -> Optional[str]:
         conc = getattr(reading, "concentration", None)
         ts_s = ts.isoformat(sep=" ", timespec="seconds") if isinstance(ts, datetime) else ""
         return f"{ts_s}|{conc}"
-    except Exception:
+    except Exception as exc:
+        log.error("glucose_dedup_key error: %s", exc)
         return None
 
 

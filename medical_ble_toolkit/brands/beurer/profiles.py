@@ -1,6 +1,6 @@
 """Beurer DeviceProfile entries — split out of the monolithic profiles.py catalog."""
 from __future__ import annotations
-from medical_ble_toolkit.profiles import DeviceProfile
+from medical_ble_toolkit.models import DeviceProfile
 
 BEURER_PROFILES: dict[str, DeviceProfile] = {
     # --- Beurer family (APK catalog; OCR excluded) ---

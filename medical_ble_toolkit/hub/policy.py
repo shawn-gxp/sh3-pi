@@ -19,11 +19,16 @@ TIER1_BRANDS: FrozenSet[str] = frozenset(
     {
         "omron",
         "nipro_nbp",
-        "nipro_nmbp",  # same BP companion path if labeled as NMBP
+        "nipro_nmbp",
         "nipro_nt100b",
-        "thermo",  # alias → NT-100B
+        "thermo",
         "masimo",
-        "beurer",  # BM/BC BP, GL*, FT*, PO60 (windowed companion)
+        "mightysat",
+        "beurer",
+        "beurer_bp",
+        "beurer_glucose",
+        "beurer_thermo",
+        "beurer_po60",
     }
 )
 

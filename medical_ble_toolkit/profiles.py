@@ -8,27 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
+from .models import DeviceProfile
 
 
-@dataclass(frozen=True)
-class DeviceProfile:
-    id: str
-    brand: str
-    model: str
-    parser_key: str
-    # Name substrings for scan filter (case-insensitive)
-    name_hints: Sequence[str] = ()
-    # Manufacturer company IDs (Bluetooth SIG assigned numbers)
-    company_ids: Sequence[int] = ()
-    # Primary service UUID to subscribe after connect
-    service_uuid: Optional[str] = None
-    # Characteristics to enable notify/indicate (full or short form)
-    notify_uuids: Sequence[str] = ()
-    # Optional write char for command-driven devices
-    write_uuid: Optional[str] = None
-    notes: str = ""
-    # If True, subscribe to ALL notify/indicate chars (RE mode)
-    subscribe_all_notifiable: bool = False
+
 
 
 # ---------------------------------------------------------------------------

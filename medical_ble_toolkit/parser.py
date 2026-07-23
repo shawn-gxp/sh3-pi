@@ -161,7 +161,15 @@ def parse(
     if profile:
         parser = get_parser(profile)
         return parser.parse(data)
-    return parse_dispatch(data, characteristic_uuid=characteristic_uuid)
+    return parse_dispatch(
+        data, 
+        characteristic_uuid=characteristic_uuid,
+        parsers=[
+            BlpBloodPressureParser(),
+            MightySatParser(),
+            ThermometerParser(),
+        ]
+    )
 
 
 # Re-export for `from medical_ble_toolkit.parser import ...`

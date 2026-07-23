@@ -45,21 +45,12 @@ class ForaParser:
 
     def parse(self, payload: bytes | bytearray) -> MultiParameterReading:
         data = bytes(payload)
-        # Return a shell object with raw_hex so RE logs still produce a model
-        # once the user forces this parser via --profile fora.
         if not data:
             raise ParseError("Empty FORA payload", data)
 
-        # TODO: replace with real field extraction after hex-dump RE sessions
-        return MultiParameterReading(
-            measured_at=datetime.now(),
-            brand=DeviceBrand.FORA,
-            model=self.model,
-            raw_hex=format_hex_dump(data),
-            notes=(
-                "UNPARSED — brochure-only docs. "
-                "Inspect [HEX] logs, map bytes, then implement offsets here."
-            ),
+        raise NotImplementedError(
+            "FORA parser is not yet implemented. "
+            "Please collect hex logs and reverse engineer the protocol."
         )
 
     def parse_or_raw(self, payload: bytes | bytearray) -> dict[str, Any]:

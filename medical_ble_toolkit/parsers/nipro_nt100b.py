@@ -26,7 +26,7 @@ from ..models import (
     TemperatureUnit,
     ThermometerReading,
 )
-from . import thermometer as ticd
+from .thermometer import ThermometerParser
 from .htp import decode_float_11073, parse_temperature_measurement
 
 ParseResult = Union[ThermometerReading, dict]
@@ -104,7 +104,7 @@ class Nt100bCompanionParser:
 
     def __init__(self) -> None:
         self.model = "NT-100B"
-        self._ticd = ticd.ThermometerParser()
+        self._ticd = ThermometerParser()
 
     def can_parse(self, payload: bytes | bytearray, characteristic_uuid: str = "") -> bool:
         u = (characteristic_uuid or "").lower().replace("-", "")

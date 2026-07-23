@@ -1,6 +1,6 @@
 """Nipro DeviceProfile entries — split out of profiles.py."""
 from __future__ import annotations
-from medical_ble_toolkit.profiles import DeviceProfile
+from medical_ble_toolkit.models import DeviceProfile
 
 NIPRO_PROFILES: dict[str, DeviceProfile] = {
 # --- Nipro げんきノート companion-like (BLELib parity) ---

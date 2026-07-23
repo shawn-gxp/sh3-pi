@@ -24,8 +24,37 @@ import medical_ble_toolkit.brands  # noqa: E402
 
 log = logging.getLogger("medical_ble_web.ble")
 
+def _insert_and_notify(**kwargs: Any) -> Optional[int]:
+    """Helper to insert reading and trigger MQTT outbox without circular db imports."""
+    rid = db.insert_reading(**kwargs)
+    if rid is not None:
+        try:
+            from mqtt_bridge import notify_reading_inserted
+            mqtt_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k not in ("session_id", "payload", "raw_hex", "dedupe")
+            }
+            notify_reading_inserted(reading_id=rid, **mqtt_kwargs)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("mqtt notify error: %s", exc)
+    return rid
+
 # Global lock: one BLE radio job at a time (Windows-safe POC)
-_ble_lock = asyncio.Lock()
+_ble_lock: Optional[asyncio.Lock] = None
+
+def _get_ble_lock() -> asyncio.Lock:
+    global _ble_lock
+    if _ble_lock is None:
+        _ble_lock = asyncio.Lock()
+    return _ble_lock
+
+_job_start_lock: Optional[asyncio.Lock] = None
+
+def _get_start_lock() -> asyncio.Lock:
+    global _job_start_lock
+    if _job_start_lock is None:
+        _job_start_lock = asyncio.Lock()
+    return _job_start_lock
 
 # Live stream state (in-memory + DB writes)
 _live_task: Optional[asyncio.Task] = None
@@ -85,7 +114,8 @@ def _push_live_to_clients() -> None:
                 except asyncio.QueueEmpty:
                     pass
             q.put_nowait(snap)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            log.debug("live queue error: %s", exc)
             dead.append(q)
     for q in dead:
         unsubscribe_live(q)
@@ -214,11 +244,12 @@ async def _pause_hub_for_manual(reason: str = "manual"):
                 log.debug("hub pause: %s", exc)
         except Exception as exc:  # noqa: BLE001
             log.debug("hub pause: %s", exc)
-        deadline = asyncio.get_event_loop().time() + max_wait_s
-        while asyncio.get_event_loop().time() < deadline:
+        deadline = asyncio.get_running_loop().time() + max_wait_s
+        while asyncio.get_running_loop().time() < deadline:
             try:
                 n = hub.conn_mgr.active_count if hasattr(hub, "conn_mgr") else 0
-            except Exception:
+            except Exception as exc:
+                log.debug("conn_mgr read error: %s", exc)
                 n = 0
             # Free as soon as no slots — do not key off phase (can be stale)
             if n <= 0:
@@ -232,12 +263,12 @@ async def _pause_hub_for_manual(reason: str = "manual"):
                 GLOBAL_PASSKEY_BROKER,
             )
             GLOBAL_PASSKEY_BROKER.cancel()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("passkey cancel error: %s", exc)
 
         # Don't hang forever if another job holds the radio
         try:
-            await asyncio.wait_for(_ble_lock.acquire(), timeout=max_wait_s)
+            await asyncio.wait_for(_get_ble_lock().acquire(), timeout=max_wait_s)
         except asyncio.TimeoutError as exc:
             raise BleJobError(
                 f"Radio busy after {max_wait_s:.0f}s — try again in a moment",
@@ -253,7 +284,7 @@ async def _pause_hub_for_manual(reason: str = "manual"):
             yield
             log.info("[RADIO] manual op end (%s)", reason)
         finally:
-            _ble_lock.release()
+            _get_ble_lock().release()
     finally:
         if hub is not None:
             try:
@@ -615,7 +646,7 @@ async def job_pair(
                     continue
                 if not (_is_clinical(row) or row.get("payload")):
                     continue
-                rid = db.insert_reading(
+                rid = _insert_and_notify(
                     device_id=device_id,
                     session_id=sid,
                     brand=profile_id,
@@ -830,7 +861,7 @@ async def job_sync(
                     row = _reading_to_row(r, profile_id)
                     if not _is_clinical(row):
                         continue
-                    rid = db.insert_reading(
+                    rid = _insert_and_notify(
                         device_id=device_id, session_id=sid, brand=profile_id,
                         reading_type=row["reading_type"], measured_at=row.get("measured_at"),
                         systolic=row.get("systolic"), diastolic=row.get("diastolic"),
@@ -853,7 +884,7 @@ async def job_sync(
                     if row["reading_type"] == "waveform":
                         continue
                     if _is_clinical(row) or row.get("payload"):
-                        rid = db.insert_reading(
+                        rid = _insert_and_notify(
                             device_id=device_id,
                             session_id=sid,
                             brand=profile_id,
@@ -887,7 +918,7 @@ async def job_sync(
                     if row["reading_type"] == "meta":
                         return
                     if _is_clinical(row) or row["reading_type"] == "raw":
-                        rid = db.insert_reading(
+                        rid = _insert_and_notify(
                             device_id=device_id, session_id=sid, brand=profile_id,
                             reading_type=row["reading_type"], measured_at=row.get("measured_at"),
                             systolic=row.get("systolic"), diastolic=row.get("diastolic"),
@@ -1022,13 +1053,19 @@ async def job_live_start(
     """
     global _live_task
 
-    if _cycle_task and not _cycle_task.done():
-        raise RuntimeError(
-            "Multi-device cycle is running — stop Cycle first, then Live"
-        )
+    async with _get_start_lock():
+        if _cycle_task and not _cycle_task.done():
+            raise RuntimeError(
+                "Multi-device cycle is running — stop Cycle first, then Live"
+            )
 
-    if _live_task and not _live_task.done():
-        raise RuntimeError("Live session already running — stop it first")
+        if _live_task and not _live_task.done():
+            raise RuntimeError("Live session already running — stop it first")
+
+        if _daemon_task and not _daemon_task.done():
+            await job_daemon_stop()
+        if _handsfree_task and not _handsfree_task.done():
+            await job_nipro_handsfree_stop()
 
     brand = get_brand(brand_id)
     if not brand:
@@ -1057,11 +1094,9 @@ async def job_live_start(
             "latest": None,
             "error": "",
             "session_id": sid,
-            "vitals_count": 0,
-            "packets": 0,
-            "updated_at": "",
-            "reconnect_attempt": 0,
+                            "reconnect_attempt": 0,
             "auto_reconnect": bool(auto_reconnect),
+            "updated_at": _live_now(),
         }
     )
     _push_live_to_clients()
@@ -1114,7 +1149,7 @@ async def job_live_start(
                 last_spo2_key = key
                 last_db_mono = mono
                 try:
-                    rid = db.insert_reading(
+                    rid = _insert_and_notify(
                         device_id=device_id,
                         session_id=sid,
                         brand=brand_id,
@@ -1138,8 +1173,8 @@ async def job_live_start(
             if on_reading:
                 try:
                     on_reading(row)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("on_reading callback error: %s", exc)
 
         try:
             while not _live_stop.is_set():
@@ -1257,8 +1292,8 @@ async def job_live_start(
                             run_task.cancel()
                             try:
                                 await client.disconnect()
-                            except Exception:  # noqa: BLE001
-                                pass
+                            except Exception as exc:  # noqa: BLE001
+                                log.debug("client disconnect error: %s", exc)
                             try:
                                 await run_task
                             except (asyncio.CancelledError, Exception):  # noqa: BLE001
@@ -1426,7 +1461,8 @@ def build_dashboard(
                     parsed = _json.loads(raw_payload)
                     if isinstance(parsed, dict):
                         payload = parsed
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("payload json decode error: %s", exc)
                     payload = {}
             elif isinstance(raw_payload, dict):
                 payload = raw_payload
@@ -1475,7 +1511,8 @@ def _push_dashboard(highlight_mac: str = "") -> None:
                 except asyncio.QueueEmpty:
                     pass
             q.put_nowait(payload)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            log.debug("dashboard queue error: %s", exc)
             dead.append(q)
     for q in dead:
         unsubscribe_live(q)
@@ -1524,13 +1561,17 @@ async def job_cycle_start(
     """
     global _cycle_task, _live_task
 
-    if _cycle_task and not _cycle_task.done():
-        raise RuntimeError("Multi-device cycle already running — stop it first")
+    async with _get_start_lock():
+        if _cycle_task and not _cycle_task.done():
+            raise RuntimeError("Multi-device cycle already running — stop it first")
 
-    # Live stream holds the radio — stop it first
-    if _live_task and not _live_task.done():
-        log.info("Stopping single-device live so multi-device cycle can start")
-        await job_live_stop()
+        # Live stream holds the radio — stop it first
+        if _live_task and not _live_task.done():
+            await job_live_stop()
+        if _daemon_task and not _daemon_task.done():
+            await job_daemon_stop()
+        if _handsfree_task and not _handsfree_task.done():
+            await job_nipro_handsfree_stop()
 
     devices = db.list_devices()
     if macs:
@@ -1866,12 +1907,15 @@ async def job_nipro_handsfree_start(
     """Background hands-free wait (uses BLE lock inside toolkit sessions)."""
     global _handsfree_task
 
-    if _handsfree_task and not _handsfree_task.done():
-        raise RuntimeError("Nipro hands-free already running — stop it first")
-    if _live_task and not _live_task.done():
-        raise RuntimeError("Live is running — stop Live first")
-    if _cycle_task and not _cycle_task.done():
-        raise RuntimeError("Cycle is running — stop Cycle first")
+    async with _get_start_lock():
+        if _handsfree_task and not _handsfree_task.done():
+            raise RuntimeError("Nipro hands-free already running — stop it first")
+        if _live_task and not _live_task.done():
+            await job_live_stop()
+        if _cycle_task and not _cycle_task.done():
+            await job_cycle_stop()
+        if _daemon_task and not _daemon_task.done():
+            await job_daemon_stop()
 
     from medical_ble_toolkit.brands.nipro.handsfree import handsfree_wait
     from medical_ble_toolkit.brands.nipro.registry import list_meters
@@ -1910,7 +1954,7 @@ async def job_nipro_handsfree_start(
                     if dev_row:
                         dev_id = dev_row.get("id")
                         
-                rid = db.insert_reading(
+                rid = _insert_and_notify(
                     device_id=dev_id,
                     session_id=None,
                     brand="nipro",
@@ -2242,20 +2286,21 @@ async def job_daemon_start(*, duration_s: float = 86400.0 * 7) -> Dict[str, Any]
     """
     global _daemon_task, _daemon_hub
 
-    if _daemon_task and not _daemon_task.done():
-        return {
-            "ok": True,
-            "message": "Hub auto-sync already running",
-            "daemon": daemon_status(),
-        }
+    async with _get_start_lock():
+        if _daemon_task and not _daemon_task.done():
+            return {
+                "ok": True,
+                "message": "Hub auto-sync already running",
+                "daemon": daemon_status(),
+            }
 
-    # One radio owner only
-    if _handsfree_task and not _handsfree_task.done():
-        await job_nipro_handsfree_stop()
-    if _live_task and not _live_task.done():
-        await job_live_stop()
-    if _cycle_task and not _cycle_task.done():
-        await job_cycle_stop()
+        # One radio owner only
+        if _handsfree_task and not _handsfree_task.done():
+            await job_nipro_handsfree_stop()
+        if _live_task and not _live_task.done():
+            await job_live_stop()
+        if _cycle_task and not _cycle_task.done():
+            await job_cycle_stop()
 
     from medical_ble_toolkit.hub import HubDaemon, load_hub_config
     from medical_ble_toolkit.hub.policy import HUB_ONLY_PAIR_TIPS

@@ -40,15 +40,7 @@ def parse_dispatch(
     Useful during reverse engineering when UUID ownership is still unknown.
     """
     if parsers is None:
-        from .blood_pressure import BlpBloodPressureParser
-        from .mightysat import MightySatParser
-        from .thermometer import ThermometerParser
-
-        parsers = [
-            BlpBloodPressureParser(),
-            MightySatParser(),
-            ThermometerParser(),
-        ]
+        parsers = []
 
     errors = []
     for p in parsers:

@@ -7,11 +7,13 @@ from bleak.exc import BleakError
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("beurer_test")
 
+import os
+
 # The standard Blood Pressure Measurement characteristic
 BP_MEASUREMENT_UUID = "00002a35-0000-1000-8000-00805f9b34fb"
 
 # CHANGE THIS TO YOUR BM54 MAC ADDRESS
-TARGET_MAC = "0C:7F:ED:72:BC:40"  
+TARGET_MAC = os.environ.get("TEST_MAC", "XX:XX:XX:XX:XX:XX")
 
 def is_auth_error(exc: Exception) -> bool:
     msg = str(exc).lower()

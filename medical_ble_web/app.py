@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -51,19 +52,8 @@ logging.basicConfig(
 )
 log = logging.getLogger("medical_ble_web")
 
-app = FastAPI(
-    title="Medical BLE Hub",
-    description="Daemon-driven hub: auto-collects from all paired BLE medical devices.",
-    version="1.0.0",
-)
-
-STATIC = ROOT / "static"
-if STATIC.is_dir():
-    app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
-
-
-@app.on_event("startup")
-async def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     db.init_db()
     log.info("SQLite ready: %s", db.DB_PATH)
     log.info("Open http://0.0.0.0:8741")
@@ -87,15 +77,26 @@ async def _startup() -> None:
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not auto-start daemon: %s", exc)
 
+    yield
 
-@app.on_event("shutdown")
-async def _shutdown() -> None:
     try:
         import mqtt_bridge
 
         mqtt_bridge.stop()
     except Exception:
         pass
+
+
+app = FastAPI(
+    title="Medical BLE Hub",
+    description="Daemon-driven hub: auto-collects from all paired BLE medical devices.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+STATIC = ROOT / "static"
+if STATIC.is_dir():
+    app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
 # ---------------------------------------------------------------------------

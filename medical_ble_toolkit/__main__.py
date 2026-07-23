@@ -8,6 +8,6 @@ Entry points:
   python -m medical_ble_toolkit --profile …     → direct connect / RE mode
 """
 
-from .ble_client import main
+from .cli import main
 
 raise SystemExit(main())

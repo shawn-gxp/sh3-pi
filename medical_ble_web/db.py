@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any, Dict, Iterator, List, Optional
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "poc.db"
+PAIRED_EXPORT_PATH = DATA_DIR / "paired_devices_backup.json"
 
 
 def _now() -> str:
@@ -121,23 +123,31 @@ def init_db(path: Path = DB_PATH) -> None:
         )
 
 
+_local = threading.local()
+
 @contextmanager
 def connect(path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
-    # timeout: wait on locks (concurrent hub workers + web)
-    conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute("PRAGMA busy_timeout=30000")
-    except sqlite3.Error:
-        pass
+    if not hasattr(_local, "conns"):
+        _local.conns = {}
+    path_str = str(path)
+
+    if path_str not in _local.conns:
+        conn = sqlite3.connect(path_str, check_same_thread=False, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.Error:
+            pass
+        _local.conns[path_str] = conn
+
+    conn = _local.conns[path_str]
     try:
         yield conn
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    finally:
-        conn.close()
 
 
 def upsert_device(
@@ -240,6 +250,14 @@ def delete_device(mac: str) -> bool:
     with connect() as conn:
         cur = conn.execute("DELETE FROM devices WHERE mac = ?", (mac_u,))
         return cur.rowcount > 0
+
+
+def export_paired_devices() -> None:
+    """Export paired devices to a JSON file for backup."""
+    devices = list_devices(paired_only=True)
+    PAIRED_EXPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(PAIRED_EXPORT_PATH, "w", encoding="utf-8") as f:
+        json.dump({"devices": devices}, f, indent=2)
 
 
 def start_session(
@@ -396,26 +414,6 @@ def insert_reading(
         )
         rid = int(cur.lastrowid)
 
-    # Cloud transfer (Android hub drop-in) — never fail local insert
-    try:
-        from mqtt_bridge import notify_reading_inserted  # type: ignore
-
-        notify_reading_inserted(
-            reading_id=rid,
-            device_id=device_id,
-            brand=brand,
-            reading_type=reading_type,
-            measured_at=measured,
-            systolic=systolic,
-            diastolic=diastolic,
-            pulse_rate=pulse_rate,
-            spo2=spo2,
-            temperature=temperature,
-            glucose_mg_dl=glucose_mg_dl,
-            perfusion_index=perfusion_index,
-        )
-    except Exception:
-        pass
 
     return rid
 

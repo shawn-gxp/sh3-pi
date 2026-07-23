@@ -227,7 +227,8 @@ class HubDaemon:
                 continue
             if d.get("paired") is False:
                 continue
-            if self.cfg.tier1_brands_only and brand not in TIER1_BRANDS:
+            profile_id = (d.get("profile_id") or d.get("brand") or "").strip().lower()
+            if self.cfg.tier1_brands_only and profile_id not in TIER1_BRANDS and brand not in TIER1_BRANDS:
                 continue
             out.append(
                 {

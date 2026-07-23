@@ -1,6 +1,6 @@
 """FORA DeviceProfile entries — split out of profiles.py."""
 from __future__ import annotations
-from medical_ble_toolkit.profiles import DeviceProfile
+from medical_ble_toolkit.models import DeviceProfile
 
 FORA_PROFILES: dict[str, DeviceProfile] = {
 "fora6": DeviceProfile(

@@ -161,7 +161,8 @@ def start() -> bool:
 
         def _on_connect(c, userdata, flags, rc, *args):
             global _connected
-            _connected = rc == 0
+            with _lock:
+                _connected = (rc == 0)
             if rc == 0:
                 log.info(
                     "MQTT connected broker=%s:%s hub_id=%s topic=%s",
@@ -176,7 +177,8 @@ def start() -> bool:
 
         def _on_disconnect(c, userdata, rc, *args):
             global _connected
-            _connected = False
+            with _lock:
+                _connected = False
             log.warning("MQTT disconnected rc=%s", rc)
 
         client.on_connect = _on_connect
@@ -253,7 +255,11 @@ def _publish_raw(topic: str, payload: dict, qos: Optional[int] = None, bypass_ou
     q = int(qos if qos is not None else _cfg.get("qos") or 1)
     body = json.dumps(payload, default=str)
     
-    if _client is None or not _connected:
+    with _lock:
+        client_ref = _client
+        is_conn = _connected
+
+    if client_ref is None or not is_conn:
         log.warning("[MQTT] not connected, publish failed topic=%s", topic)
         if not bypass_outbox:
             try:
@@ -265,7 +271,7 @@ def _publish_raw(topic: str, payload: dict, qos: Optional[int] = None, bypass_ou
         return False
 
     try:
-        info = _client.publish(topic, body, qos=q, retain=False)
+        info = client_ref.publish(topic, body, qos=q, retain=False)
         # paho returns MQTTMessageInfo
         ok = True
         try:
@@ -540,10 +546,13 @@ def notify_reading_inserted(
 
 
 def status() -> Dict[str, Any]:
-    cfg = _cfg or _load_cfg()
+    """Admin dashboard API."""
+    with _lock:
+        is_conn = _connected
+        cfg = _cfg or _load_cfg()
     return {
         "enabled": bool(cfg.get("enabled")),
-        "connected": _connected,
+        "connected": is_conn,
         "broker": cfg.get("broker"),
         "topic": cfg.get("topic"),
         "hub_id": cfg.get("hub_id"),
