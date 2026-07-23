@@ -88,6 +88,12 @@ async def lifespan(app: FastAPI):
     yield
 
     try:
+        from fall_detection import camera_loop
+        camera_loop.stop()
+    except Exception:
+        pass
+
+    try:
         import mqtt_bridge
 
         mqtt_bridge.stop()
@@ -144,9 +150,89 @@ class PatientSetting(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Fall Detection API Routes
 # ---------------------------------------------------------------------------
 
+from fastapi.responses import StreamingResponse
+
+@app.get("/api/fall/stream")
+async def fall_stream():
+    """Live MJPEG stream of the camera feed with pose overlay."""
+    def generate():
+        import time
+        from fall_detection import camera_loop
+        while True:
+            jpeg = camera_loop.get_latest_jpeg()
+            if jpeg:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
+            time.sleep(0.04)  # ~25 FPS
+    return StreamingResponse(
+        generate(), media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+@app.get("/api/fall/roi")
+async def fall_roi_get() -> Dict[str, Any]:
+    """Get the current bed boundary polygon."""
+    from fall_detection import camera_loop
+    return {"ok": True, "polygon": camera_loop.get_active_polygon()}
+
+class PolygonBody(BaseModel):
+    polygon: List[Dict[str, float]]
+
+@app.post("/api/fall/roi")
+async def fall_roi_post(body: PolygonBody) -> Dict[str, Any]:
+    """Set the bed boundary polygon (expects 4 points, normalized 0.0-1.0)."""
+    if len(body.polygon) < 3:
+        raise HTTPException(400, "Polygon must have at least 3 points")
+    
+    # Convert to list of tuples
+    new_polygon = [(pt["x"], pt["y"]) for pt in body.polygon]
+    
+    # Update active detector instantly
+    from fall_detection import camera_loop
+    camera_loop.update_polygon(new_polygon)
+    
+    # Persist ROI to repo-root hub_config.json (same file config.py loads)
+    try:
+        import json
+        from fall_detection.config import hub_config_path
+
+        cfg_path = hub_config_path()
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.is_file() else {}
+        if "fall_detection" not in cfg:
+            cfg["fall_detection"] = {}
+        cfg["fall_detection"]["polygon"] = new_polygon
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log.warning("Could not persist ROI to hub_config.json: %s", exc)
+
+    return {"ok": True, "polygon": new_polygon}
+
+from fastapi import Request
+
+@app.post("/api/fall/frame")
+async def fall_frame_post(request: Request) -> Dict[str, Any]:
+    """Receives a JPEG frame uploaded from browser/phone camera and runs fall detection."""
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "Empty image body")
+    from fall_detection import camera_loop
+    return camera_loop.process_client_frame(data)
+
+class LandmarksBody(BaseModel):
+    landmarks: Any
+
+@app.post("/api/fall/landmarks")
+async def fall_landmarks_post(body: LandmarksBody) -> Dict[str, Any]:
+    """Receives normalized skeletal landmark points (33 MediaPipe keypoints or dict) and evaluates fall detection."""
+    from fall_detection import camera_loop
+    return camera_loop.process_normalized_landmarks(body.landmarks)
+
+
+# ---------------------------------------------------------------------------
+# Standard Web UI Routes
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 async def index() -> FileResponse:
@@ -432,13 +518,63 @@ async def set_patient_setting(body: PatientSetting) -> Dict[str, Any]:
     return {"ok": True, "patient_id": body.patient_id.strip()}
 
 
+def generate_self_signed_cert(cert_path: str, key_path: str):
+    import datetime
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Medical BLE Hub")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365))
+        .sign(key, hashes.SHA256())
+    )
+    with open(key_path, "wb") as f:
+        f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+    with open(cert_path, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+
+
 def main() -> None:
     import uvicorn
+
+    use_ssl = os.getenv("USE_SSL", "0").lower() in ("1", "true", "yes") or os.getenv("SSL", "0").lower() in ("1", "true", "yes")
+    cert_file = ROOT / "cert.pem"
+    key_file = ROOT / "key.pem"
+
+    if use_ssl or "--ssl" in sys.argv:
+        if not (cert_file.exists() and key_file.exists()):
+            try:
+                generate_self_signed_cert(str(cert_file), str(key_file))
+                log.info("Auto-generated SSL certificate: %s", cert_file)
+            except Exception as exc:
+                log.warning("Could not auto-generate SSL cert: %s", exc)
+
+        if cert_file.exists() and key_file.exists():
+            log.info("HTTPS Enabled! Open https://0.0.0.0:8741")
+            uvicorn.run(
+                "app:app",
+                host=os.getenv("HOST", "0.0.0.0"),
+                port=int(os.getenv("PORT", "8741")),
+                reload=False,
+                log_level="info",
+                ssl_certfile=str(cert_file),
+                ssl_keyfile=str(key_file),
+            )
+            return
 
     uvicorn.run(
         "app:app",
         host=os.getenv("HOST", "0.0.0.0"),
-        port=8741,
+        port=int(os.getenv("PORT", "8741")),
         reload=False,
         log_level="info",
     )

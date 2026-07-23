@@ -1,0 +1,274 @@
+{
+  "source": {
+    "app": "iFORA Smart",
+    "package": "com.foracare.tdlink.sm",
+    "version_name": "1.5.9",
+    "version_code": 62,
+    "decompiled": "datasheets/FORA/extracted/decompiled/sources/com/foracare/tdlink/sm/",
+    "analyzed": "2026-07-23",
+    "method": "jadx full decompile"
+  },
+  "gatt": {
+    "service_uuid": "00001523-1212-efde-1523-785feabcd123",
+    "characteristic_uuid": "00001524-1212-efde-1523-785feabcd123",
+    "write_type": "WRITE_TYPE_NO_RESPONSE",
+    "write_type_android_int": 1,
+    "cccd": "ENABLE_NOTIFICATION_VALUE on first descriptor",
+    "connectGatt": {
+      "autoConnect": false,
+      "transport": 2,
+      "transport_name": "TRANSPORT_LE"
+    },
+    "scanSettings": {
+      "scanMode": 2,
+      "scanMode_name": "SCAN_MODE_LOW_LATENCY",
+      "reportDelayMs": 0
+    },
+    "onFail": ["disconnectGatt", "refreshDeviceCache (hidden API)", "closeBluetoothGatt"]
+  },
+  "pairing": {
+    "meter_pin_code": "111111",
+    "name_prefixes_contains": ["fora", "td-", "tng", "diamond", "taidoc", "sootheneb"],
+    "exact_name_log_branch": "FORA",
+    "requires_os_bond": true,
+    "paired_slots_max": 12,
+    "getPairedPos_scan_range": "0..10",
+    "pref_keys": {
+      "addr": "BLE_PAIRED_METER_ADDR_{pos}",
+      "name": "BLE_PAIRED_METER_NAME_{pos}",
+      "init": "BLE_PAIRED_METER_INIT_{pos}"
+    },
+    "needRemoveRecord": "INIT pref at pos is non-empty and equals \"0\" triggers re-import wipe flag"
+  },
+  "frame": {
+    "start": 81,
+    "start_hex": "51",
+    "alt_start_ws": 119,
+    "direction_out": 163,
+    "direction_out_hex": "A3",
+    "direction_in": 165,
+    "direction_in_hex": "A5",
+    "checksum": "sum(all_bytes_except_last) & 0xFF for RX validation; TX uses sum of template including dir",
+    "rx_accept_short": "len>=8 && start==0x51 && penultimate==0xA5 && last==checksum",
+    "rx_accept_ws_long": "reassemble to 34 or 40; start 0x51|0x77; penultimate 0xA5; last checksum"
+  },
+  "command_templates_pre_checksum": {
+    "project_code": [81, 36, 0, 0, 0, 0, 163],
+    "record_number": [81, 43, 0, 0, 0, 0, 163],
+    "record_datetime": [81, 37, 0, 0, 0, 0, 163],
+    "record_value": [81, 38, 0, 0, 0, 0, 163],
+    "power_off": [81, 80, 0, 0, 0, 0, 163],
+    "serial_1": [81, 40, 0, 0, 0, 0, 163],
+    "serial_2": [81, 39, 0, 0, 0, 0, 163],
+    "set_datetime": [81, 51, 0, 0, 0, 0, 163],
+    "ws_read": [81, 113, 2, 0, 0, 0, 163],
+    "ws_read2": [81, 119, 2, 0, 0, 0, 163],
+    "get_new_spo2": [81, 73, 0, 0, 0, 0, 163],
+    "firmware": [81, 41, 0, 0, 0, 0, 163],
+    "clear_memory": [81, 82, 0, 0, 0, 0, 163],
+    "set_monitor_sw_stop": [81, 71, 0, 0, 0, 0, 163],
+    "set_ble_status": [81, 57, 255, 255, 255, 255, 163],
+    "peakflow_person_info1": [81, 106, 0, 0, 0, 0, 163],
+    "peakflow_person_info2": [81, 107, 0, 0, 0, 0, 163],
+    "set_peakflow_person_info1": [81, 58, 0, 0, 0, 0, 163],
+    "set_peakflow_person_info2": [81, 59, 0, 0, 0, 0, 163],
+    "peakflow_setting1": [81, 32, 0, 0, 0, 0, 163],
+    "peakflow_setting2": [81, 18, 0, 0, 0, 0, 163],
+    "peakflow_setting3": [81, 19, 0, 0, 0, 0, 163],
+    "set_peakflow_setting1": [81, 64, 0, 0, 0, 0, 163],
+    "set_peakflow_setting2": [81, 20, 0, 0, 0, 0, 163],
+    "set_peakflow_setting3": [81, 17, 0, 0, 0, 0, 163],
+    "peakflow_record1": [81, 21, 0, 0, 0, 0, 163],
+    "peakflow_record2": [81, 22, 0, 0, 0, 0, 163],
+    "peakflow_record3": [81, 23, 0, 0, 0, 0, 163],
+    "peakflow_record4": [81, 24, 0, 0, 0, 0, 163],
+    "peakflow_record5": [81, 25, 0, 0, 0, 0, 163],
+    "set_ws_user_profile": [81, 120, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 163]
+  },
+  "opcodes_hex": {
+    "0x24": "project_code",
+    "0x25": "record_datetime",
+    "0x26": "record_value",
+    "0x27": "serial_2",
+    "0x28": "serial_1",
+    "0x29": "firmware",
+    "0x2B": "record_number",
+    "0x33": "set_datetime",
+    "0x39": "set_ble_status",
+    "0x47": "set_monitor_sw_stop",
+    "0x49": "get_new_spo2",
+    "0x50": "power_off",
+    "0x52": "clear_memory",
+    "0x71": "ws_read",
+    "0x77": "ws_read2"
+  },
+  "set_datetime_packing": {
+    "byte2": "month*32 + day",
+    "byte3": "(year-2000)*2 + (1 if month>7 else 0)",
+    "byte4": "minute",
+    "byte5": "hour"
+  },
+  "record_index_packing": {
+    "byte2": "index & 0xFF",
+    "byte3": "(index >> 8) & 0xFF",
+    "byte5": "user"
+  },
+  "serial_parse": {
+    "sn1": "sprintf %02x%02x%02x%02x of data[5],data[4],data[3],data[2]",
+    "sn2": "append same format; total should be 16 hex chars; length>16 is error"
+  },
+  "project_code_parse": {
+    "formula": "sprintf %02x%02x of data[3],data[2]",
+    "examples": ["3280", "3261", "4272", "4255", "2560", "7301"]
+  },
+  "record_datetime_decode": {
+    "source": "tmpByte[0..3] = record1 message data[2..5]",
+    "year": "(tmp1 // 2) + 2000",
+    "month": "((tmp0 & 0xE0) // 32) + ((tmp1 & 1) * 8)",
+    "day": "tmp0 & 0x1F",
+    "hour": "tmp3 & 0x1F",
+    "minute": "tmp2 & 0x3F"
+  },
+  "record_value_decode_bg": {
+    "value_u16_le": "message[0] | (message[1]<<8)",
+    "invalid": 65535,
+    "meal_flags": "message[3]; 0x40=AC before meal, 0x80=PC after meal",
+    "range_mg_dl": [20, 600]
+  },
+  "record_count_parse": {
+    "importType_WS_8": "data[2] | (data[3]<<8) LE",
+    "other_types_decompiled": "data[2] | data[3]  (no shift — hi byte often 0)"
+  },
+  "getDataType_project_prefix": {
+    "32_status_true": 6,
+    "32_after_record_bit7": "BP if (tmpByte[2]&0x80) else BG",
+    "1xxxx": 60,
+    "2xxxx": 8,
+    "3xxxx": 2,
+    "4xxxx": 1,
+    "8xxxx": 7,
+    "73xx": 31,
+    "70xx": 32
+  },
+  "import_types": {
+    "1": "BG",
+    "2": "BP",
+    "6": "MP_multiparam_2in1",
+    "7": "SpO2",
+    "8": "WS",
+    "31": "PeakFlow",
+    "32": "Nebulizer",
+    "60": "TM_ear"
+  },
+  "post_project_branch": {
+    "importType_7_SpO2": "firmware → maybe setBLEStatus → poll getNewSpO2 until non-zero (15s timeout loop) → records",
+    "importType_31_PeakFlow": "getPeakFlowInfo1 path",
+    "default": "firmware (if not SpO2) then getRecordsNumberForUserNo",
+    "userNo_special": {
+      "3280_3128": 1,
+      "3261_2560_3132_2555": "from CaseProfile.user_no",
+      "importType_8": -1,
+      "else": 0
+    }
+  },
+  "after_record_count": {
+    "if_zero": "MESSAGE_STATE_IMPORT_SUCCESSFUL(12) + powerOff + FINISH delayed 200ms",
+    "type_8_WS": "readWSMeasureValue loop (long frame 34/40)",
+    "type_31_PeakFlow": "importCount=1; getPeakFlowRecord1",
+    "types_1_2_6_7_60_32": "getRecord1 then getRecord2 loop"
+  },
+  "timings_ms": {
+    "scan_window": 3000,
+    "connect_timeout": 10000,
+    "after_connect_discover_delay": 500,
+    "after_cccd_start_import": 500,
+    "cmd_response_timeout": 5000,
+    "set_datetime_timeout": 15000,
+    "spo2_poll_timeout": 15000,
+    "cmd_max_retries": 12,
+    "after_comm_timeout_finish": 200,
+    "htc_device_delay": 3000,
+    "htc_unpair_pair_delay": 2000
+  },
+  "import_fsm": [
+    "set_datetime",
+    "serial_1",
+    "serial_2",
+    "project_code",
+    "optional_firmware_or_spo2_path",
+    "record_number",
+    "loop_records_by_type",
+    "power_off"
+  ],
+  "message_codes": {
+    "MSG_CONNECT_FAIL": 1,
+    "MSG_DISCONNECTED": 2,
+    "MSG_RECONNECT": 3,
+    "MSG_DISCOVER_SERVICES": 4,
+    "MSG_DISCOVER_FAIL": 5,
+    "MSG_DISCOVER_SUCCESS": 6,
+    "MSG_CONNECT_OVER_TIME": 7,
+    "MSG_SCAN_ON": 8,
+    "MSG_SCAN_TIMEOUT": 9,
+    "MSG_SCAN_RESULT": 16,
+    "MSG_SCAN_FAIL": 17,
+    "MESSAGE_STATE_READY_START_IMPORT": 1,
+    "MESSAGE_STATE_NEED_TO_PAIR_DEVICE": 2,
+    "MESSAGE_STATE_CONNECTED_METER_NOT_PAIRED_WITH_ANDROID_PHONE": 6,
+    "MESSAGE_STATE_EXCEED_RETRY_TIMES": 7,
+    "MESSAGE_STATE_NOT_SUPPORT_METER": 8,
+    "MESSAGE_STATE_CONNECTING_METER": 9,
+    "MESSAGE_STATE_CONNECT_METER_SUCCESS": 10,
+    "MESSAGE_STATE_IMPORTING": 11,
+    "MESSAGE_STATE_IMPORT_SUCCESSFUL": 12,
+    "MESSAGE_STATE_NO_RECORD_TO_IMPORT": 13,
+    "MESSAGE_STATE_COMMUNICATION_TIMEOUT": 14,
+    "MESSAGE_STATE_FINISH_IMPORT": 16,
+    "MESSAGE_STATE_TURN_OFF_METER": 18
+  },
+  "meter_models": [
+    "TD3223", "TD3252", "TD3258", "TD3261", "TD3250",
+    "TD4256", "TD4257", "TD4272", "TD4127", "TD4282", "TD4283", "TD4279",
+    "TD4255", "TD4240", "TD4230",
+    "TD3132", "TD3128", "TD3129", "TD3140", "TD3280",
+    "TD1261", "TD1035",
+    "TD8002", "TD8201", "TD8255",
+    "TD2500", "TD2501", "TD2551", "TD2552", "TD2555", "TD2599"
+  ],
+  "measurement_type_values": {
+    "BG": 1, "BP": 2, "SpO2": 7, "BodyWeight": 8, "Step": 9,
+    "PeakFlow": 31, "Nebulizer": 32, "Ear": 60, "ForHead": 61,
+    "HEMATOCRIT": 90, "HB": 91, "KT": 92, "LACTATE": 93, "UA": 94, "CHOL": 95, "TG": 96
+  },
+  "clinical_ranges": {
+    "BG": [20, 600],
+    "KT": [0.1, 8.0],
+    "HCT": [0.0, 70.0],
+    "HB": [6.8, 24.0],
+    "UA": [3.0, 20.0],
+    "CHOL": [100.0, 500.0],
+    "LAC": [0.3, 23.0],
+    "TG": [0.0, 300.0]
+  },
+  "bp_ihb_decode_notes": {
+    "3140": "uses tmpByte[7] and (tmpByte[2]&0xC0)>>6",
+    "32xx": "(tmp[3]&0x60)>>5 and (tmp[2]&0x40)",
+    "other": "(tmpByte[2]&0x40)/64 as IHB flag base",
+    "pulse_thresholds": "tachycardia if pulse>=110, bradycardia if <=50"
+  },
+  "multiparam_hctCombine": {
+    "note": "onGetRecord2 sets hctCombine 0/1/2 from BG type switch; for non-32xx may skip last records when combining HCT strips",
+    "hci_required": true
+  },
+  "not_ble": {
+    "cloud_like_strings": ["iforasmartgm", "iforasmartgm123", "iforasmartap", "iforasmartap123"],
+    "note": "account/cloud credentials — do not use as BLE PIN (BLE PIN is 111111)"
+  },
+  "toolkit": {
+    "protocol": "medical_ble_toolkit/brands/fora/protocol.py",
+    "session": "medical_ble_toolkit/brands/fora/session.py",
+    "plugin": "medical_ble_toolkit/brands/fora/plugin.py",
+    "parser": "medical_ble_toolkit/parsers/fora.py",
+    "doc": "datasheets/FORA/FORA_FIRST_PARTY_PROTOCOL.md"
+  }
+}

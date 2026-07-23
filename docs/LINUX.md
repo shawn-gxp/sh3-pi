@@ -51,10 +51,16 @@ For Raspberry Pi fallback video processing:
 # 1. Install OS dependencies for Video4Linux
 sudo apt install -y libcamera-dev v4l-utils
 
-# 2. Install ML and vision libraries
-.venv/bin/pip install mediapipe>=0.10.0 opencv-python-headless>=4.8.0
+# 2. Install ML and vision libraries (MediaPipe Tasks / PoseLandmarker)
+#    mediapipe>=0.10.30 uses the Tasks API (not the removed mp.solutions.pose).
+#    It depends on opencv-contrib-python — do NOT also install opencv-python-headless
+#    in the same venv (OpenCV package conflicts).
+.venv/bin/pip install "mediapipe>=0.10.30" "numpy>=1.26" "requests>=2.31"
 
-# 3. Verify camera device exists
+# 3. First pose run auto-downloads pose_landmarker_lite.task into
+#    fall_detection/models/ (or set FALL_POSE_MODEL_PATH / FALL_POSE_MODEL=full|heavy)
+
+# 4. Verify camera device exists
 ls /dev/video*
 ```
 

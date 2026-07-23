@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tele-ICU Fall Detection & Calibration</title>
+  <!-- MediaPipe Pose JS Client Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <style>
+    :root { --bg: #0f1419; --panel: #1a2332; --text: #e7ecf3; --accent: #3d9cf0; --ok: #3ecf8e; --err: #f07178; --warn: #f0b429; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    header { padding: 1rem; background: var(--panel); border-bottom: 1px solid #2d3a4d; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+    h1 { margin: 0; font-size: 1.25rem; }
+    main { padding: 1rem; max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
+    
+    .status-banner {
+      padding: 0.75rem; border-radius: 8px; font-weight: bold; text-align: center;
+      font-size: 1.1rem; background: #2d3a4d; transition: all 0.3s;
+    }
+    .status-banner.SAFE { background: rgba(62, 207, 142, 0.2); color: var(--ok); border: 1px solid var(--ok); }
+    .status-banner.NEAR_EDGE { background: rgba(240, 180, 41, 0.2); color: var(--warn); border: 1px solid var(--warn); }
+    .status-banner.FALL_DETECTED { background: rgba(240, 113, 120, 0.3); color: var(--err); border: 1px solid var(--err); animation: pulse 1s infinite; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+    .video-container {
+      position: relative; width: 100%; max-width: 800px; margin: 0 auto;
+      border: 2px solid #2d3a4d; border-radius: 8px; overflow: hidden; background: #000;
+      aspect-ratio: 4/3;
+    }
+    #localVideo, #mjpegImg { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; }
+    
+    .mode-selector { display: flex; gap: 0.5rem; justify-content: center; background: var(--panel); padding: 0.5rem; border-radius: 8px; }
+    .controls { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+    button {
+      background: var(--accent); color: #fff; border: none; padding: 0.6rem 1.2rem;
+      border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem;
+    }
+    button:hover { opacity: 0.9; }
+    button.secondary { background: #2d3a4d; }
+    button.active { background: var(--ok); color: #000; }
+    
+    .toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #3ecf8e; color: #000; padding: 0.5rem 1rem; border-radius: 4px;
+      font-weight: 600; display: none; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Fall Detection & Calibration</h1>
+    <a href="/" style="color:var(--accent); text-decoration:none; font-weight:bold;">← Back to Hub</a>
+  </header>
+
+  <main>
+    <div class="mode-selector">
+      <button id="btnModeWebcam" class="active" onclick="switchMode('webcam')">📱 Use Phone / PC Web Camera</button>
+      <button id="btnModePi" class="secondary" onclick="switchMode('pi')">📹 Use Pi Server Camera</button>
+    </div>
+
+    <div class="status-banner SAFE" id="statusBanner">
+      Status: Safe Area (Monitoring)
+    </div>
+    
+    <div class="video-container" id="vc">
+      <!-- Browser/Phone Camera Video -->
+      <video id="localVideo" autoplay playsinline muted></video>
+      <!-- Pi MJPEG Server Stream -->
+      <img id="mjpegImg" src="" alt="Pi Camera Stream" style="display:none;" />
+      <!-- Calibration Polygon Canvas -->
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div class="controls">
+      <button onclick="startWebcam()" id="btnRetryCam">📷 Start / Retry Camera</button>
+      <button onclick="toggleCameraFacing()" id="btnFlipCam">🔄 Flip Camera (Rear)</button>
+      <button onclick="saveROI()">Save Bed Boundary</button>
+      <button class="secondary" onclick="presetCenter()">Center Bed Preset</button>
+      <button class="secondary" onclick="presetFull()">Full Frame Preset</button>
+    </div>
+    
+    <p style="text-align: center; color: #8b9bb4; font-size: 0.9rem;">
+      <b>Calibration:</b> Drag the 4 corner dots to outline the bed. Green = safe. Outside = alarm.
+      If camera fails: close other apps using the camera, only keep one fall-detection tab open, then tap <b>Start / Retry Camera</b>.
+    </p>
+  </main>
+
+  <div class="toast" id="toast">ROI Saved Successfully!</div>
+
+  <!-- Offscreen canvas for grabbing frames -->
+  <canvas id="captureCanvas" style="display:none;"></canvas>
+
+  <script>
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+    const localVideo = document.getElementById('localVideo');
+    const mjpegImg = document.getElementById('mjpegImg');
+    const vc = document.getElementById('vc');
+    const captureCanvas = document.getElementById('captureCanvas');
+    const captureCtx = captureCanvas.getContext('2d');
+    const statusBanner = document.getElementById('statusBanner');
+    
+    let activeMode = 'webcam'; // 'webcam' or 'pi'
+    let mediaStream = null;
+    let frameSendInterval = null;
+    let draggingPoint = null;
+    let mpPoseClient = null;
+    let mpCamera = null;
+    let currentLandmarks = null;
+    const POINT_RADIUS = 10;
+
+    let points = [
+      {x: 0.2, y: 0.2}, {x: 0.8, y: 0.2},
+      {x: 0.8, y: 0.8}, {x: 0.2, y: 0.8}
+    ];
+
+    function resizeCanvas() {
+      canvas.width = vc.clientWidth;
+      canvas.height = vc.clientHeight;
+      draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (points.length !== 4) return;
+
+      // 1. Draw Skeleton if detected by client-side MediaPipe
+      if (currentLandmarks && activeMode === 'webcam') {
+        ctx.fillStyle = '#ff5722';
+        ctx.strokeStyle = '#00bcd4';
+        ctx.lineWidth = 2;
+        
+        // Draw key joints
+        const keyIndices = [11, 12, 23, 24, 25, 26, 27, 28];
+        keyIndices.forEach(idx => {
+          const lm = currentLandmarks[idx];
+          if (lm && lm.visibility > 0.4) {
+            ctx.beginPath();
+            ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        });
+      }
+
+      // 2. Draw Green Safe Zone Polygon
+      const pxPoints = points.map(p => ({ x: p.x * canvas.width, y: p.y * canvas.height }));
+
+      ctx.beginPath();
+      ctx.moveTo(pxPoints[0].x, pxPoints[0].y);
+      for (let i = 1; i < 4; i++) {
+        ctx.lineTo(pxPoints[i].x, pxPoints[i].y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(62, 207, 142, 0.2)';
+      ctx.fill();
+      ctx.strokeStyle = '#3ecf8e';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // 3. Draw Handle Dots
+      pxPoints.forEach((p, idx) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.strokeStyle = '#3ecf8e';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#000';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(idx + 1, p.x - 3, p.y + 3);
+      });
+    }
+
+    function getMousePos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return {
+        x: (clientX - rect.left) / canvas.width,
+        y: (clientY - rect.top) / canvas.height
+      };
+    }
+
+    function onDown(e) {
+      const pos = getMousePos(e);
+      let minDistance = Infinity;
+      let closestIdx = -1;
+      
+      points.forEach((p, idx) => {
+        const dx = (p.x - pos.x) * canvas.width;
+        const dy = (p.y - pos.y) * canvas.height;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < POINT_RADIUS * 3 && dist < minDistance) {
+          minDistance = dist;
+          closestIdx = idx;
+        }
+      });
+      
+      if (closestIdx !== -1) draggingPoint = closestIdx;
+    }
+
+    function onMove(e) {
+      if (draggingPoint === null) return;
+      e.preventDefault();
+      const pos = getMousePos(e);
+      points[draggingPoint].x = Math.max(0, Math.min(1, pos.x));
+      points[draggingPoint].y = Math.max(0, Math.min(1, pos.y));
+      draw();
+    }
+
+    function onUp() { draggingPoint = null; }
+
+    canvas.addEventListener('mousedown', onDown);
+    canvas.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    canvas.addEventListener('touchstart', onDown, {passive: false});
+    canvas.addEventListener('touchmove', onMove, {passive: false});
+    window.addEventListener('touchend', onUp);
+
+    function presetCenter() {
+      points = [ {x: 0.2, y: 0.2}, {x: 0.8, y: 0.2}, {x: 0.8, y: 0.8}, {x: 0.2, y: 0.8} ];
+      draw();
+    }
+
+    function presetFull() {
+      points = [ {x: 0.0, y: 0.0}, {x: 1.0, y: 0.0}, {x: 1.0, y: 1.0}, {x: 0.0, y: 1.0} ];
+      draw();
+    }
+
+    async function saveROI() {
+      try {
+        const res = await fetch('/api/fall/roi', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ polygon: points })
+        });
+        if (res.ok) {
+          const t = document.getElementById('toast');
+          t.style.display = 'block';
+          setTimeout(() => t.style.display = 'none', 3000);
+        } else {
+          alert("Failed to save ROI");
+        }
+      } catch (err) {
+        alert("Error saving ROI: " + err.message);
+      }
+    }
+
+    function updateStatusUI(event) {
+      // Map API event names → CSS classes
+      let css = 'SAFE';
+      if (event === 'FALL_DETECTED') css = 'FALL_DETECTED';
+      else if (event === 'PATIENT_NEAR_EDGE') css = 'NEAR_EDGE';
+      else if (event === 'PATIENT_LEFT_BED') css = 'NEAR_EDGE';
+      statusBanner.className = 'status-banner ' + css;
+      if (event === 'FALL_DETECTED') {
+        statusBanner.innerText = '🚨 CRITICAL ALERT: FALL DETECTED!';
+      } else if (event === 'PATIENT_NEAR_EDGE') {
+        statusBanner.innerText = '⚠️ WARNING: Patient Near Bed Edge';
+      } else if (event === 'PATIENT_LEFT_BED') {
+        statusBanner.innerText = '⚠️ ALERT: Patient Left Bed Area';
+      } else {
+        statusBanner.innerText = '✅ Safe Area (Monitoring)';
+      }
+    }
+
+    // Prefer rear on phones; front is more reliable on laptops (no rear cam)
+    let currentFacingMode = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)
+      ? 'environment'
+      : 'user';
+    let poseRafId = null;
+    let startingCamera = false;
+
+    async function toggleCameraFacing() {
+      currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+      const btn = document.getElementById('btnFlipCam');
+      if (btn) {
+        btn.innerText = currentFacingMode === 'environment'
+          ? '🔄 Flip Camera (Rear)'
+          : '🔄 Flip Camera (Front/Selfie)';
+      }
+      await startWebcam();
+    }
+
+    // Initialize Client-side MediaPipe Pose JS
+    function initMediaPipePose() {
+      if (typeof Pose === 'undefined') {
+        console.warn('MediaPipe Pose JS not loaded (CDN blocked?). Will use server frame path.');
+        return;
+      }
+      mpPoseClient = new Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+      });
+      mpPoseClient.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      mpPoseClient.onResults(onPoseResults);
+    }
+
+    let lastLandmarkSendTime = 0;
+
+    async function onPoseResults(results) {
+      if (results.poseLandmarks) {
+        currentLandmarks = results.poseLandmarks;
+        draw();
+
+        const now = Date.now();
+        if (now - lastLandmarkSendTime > 80) { // ~12 FPS
+          lastLandmarkSendTime = now;
+          try {
+            const res = await fetch('/api/fall/landmarks', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ landmarks: currentLandmarks })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              updateStatusUI(data.event);
+            }
+          } catch (e) {
+            console.warn("Landmark send error:", e);
+          }
+        }
+      } else {
+        currentLandmarks = null;
+        draw();
+      }
+    }
+
+    async function acquireCameraStream() {
+      // Progressive fallbacks — rear cam / strict size often fail on PC
+      const attempts = [
+        { video: { facingMode: { ideal: currentFacingMode }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
+        { video: { facingMode: currentFacingMode }, audio: false },
+        { video: { facingMode: { ideal: 'user' } }, audio: false },
+        { video: true, audio: false },
+      ];
+      let lastErr = null;
+      for (const constraints of attempts) {
+        try {
+          return await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+          lastErr = err;
+          console.warn('getUserMedia failed for', constraints, err.name, err.message);
+        }
+      }
+      throw lastErr || new Error('No camera available');
+    }
+
+    function startPoseLoop() {
+      // Drive MediaPipe from our stream — do NOT use MediaPipe Camera
+      // (it calls getUserMedia again → NotReadableError: could not start video source)
+      if (poseRafId) cancelAnimationFrame(poseRafId);
+      const tick = async () => {
+        if (activeMode !== 'webcam' || !mpPoseClient || !localVideo.srcObject) {
+          poseRafId = null;
+          return;
+        }
+        if (localVideo.readyState >= 2) {
+          try {
+            await mpPoseClient.send({ image: localVideo });
+          } catch (e) {
+            /* ignore single-frame errors */
+          }
+        }
+        poseRafId = requestAnimationFrame(tick);
+      };
+      poseRafId = requestAnimationFrame(tick);
+    }
+
+    async function startWebcam() {
+      if (startingCamera) return;
+      startingCamera = true;
+      statusBanner.innerText = '📷 Starting camera…';
+      try {
+        // Always release first so retry works after NotReadableError
+        stopWebcam();
+        await new Promise(r => setTimeout(r, 150));
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('This browser has no camera API. Use HTTPS (not HTTP) and a modern browser.');
+        }
+
+        mediaStream = await acquireCameraStream();
+        localVideo.srcObject = mediaStream;
+        localVideo.muted = true;
+        localVideo.playsInline = true;
+        localVideo.style.display = 'block';
+        mjpegImg.style.display = 'none';
+        try { await localVideo.play(); } catch (e) { console.warn('video.play()', e); }
+
+        localVideo.onloadedmetadata = () => resizeCanvas();
+        resizeCanvas();
+
+        if (mpPoseClient) {
+          startPoseLoop();
+        } else {
+          if (frameSendInterval) clearInterval(frameSendInterval);
+          frameSendInterval = setInterval(sendFrameToBackend, 100);
+        }
+        statusBanner.innerText = '✅ Camera on — monitoring';
+        statusBanner.className = 'status-banner SAFE';
+      } catch (err) {
+        const name = err && err.name ? err.name : 'Error';
+        const msg = err && err.message ? err.message : String(err);
+        console.error('Camera start failed', name, msg);
+        let help = name + ': ' + msg;
+        if (name === 'NotReadableError' || /could not start video source/i.test(msg)) {
+          help =
+            'Camera is busy or locked (NotReadableError).\n\n' +
+            '1. Close other apps using the camera (Zoom, Teams, other browser tabs)\n' +
+            '2. Keep only ONE fall-detection tab open\n' +
+            '3. On Windows: Settings → Privacy → Camera → allow this browser\n' +
+            '4. Tap “Start / Retry Camera”\n' +
+            '5. Or try Flip Camera (front vs rear)';
+        } else if (name === 'NotAllowedError') {
+          help = 'Camera permission denied. Allow camera for this site and retry.';
+        } else if (name === 'NotFoundError') {
+          help = 'No camera found on this device.';
+        }
+        statusBanner.innerText = '❌ Camera failed — tap Start / Retry Camera';
+        statusBanner.className = 'status-banner FALL_DETECTED';
+        alert(help);
+      } finally {
+        startingCamera = false;
+      }
+    }
+
+    function stopWebcam() {
+      if (frameSendInterval) {
+        clearInterval(frameSendInterval);
+        frameSendInterval = null;
+      }
+      if (poseRafId) {
+        cancelAnimationFrame(poseRafId);
+        poseRafId = null;
+      }
+      if (mpCamera) {
+        try { mpCamera.stop(); } catch (e) {}
+        mpCamera = null;
+      }
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => {
+          try { track.stop(); } catch (e) {}
+        });
+        mediaStream = null;
+      }
+      if (localVideo.srcObject) {
+        try {
+          const tracks = localVideo.srcObject.getTracks ? localVideo.srcObject.getTracks() : [];
+          tracks.forEach(t => { try { t.stop(); } catch (e) {} });
+        } catch (e) {}
+      }
+      localVideo.srcObject = null;
+    }
+
+    let isSendingFrame = false;
+
+    async function sendFrameToBackend() {
+      if (activeMode !== 'webcam' || isSendingFrame || !localVideo.videoWidth) return;
+      isSendingFrame = true;
+
+      captureCanvas.width = localVideo.videoWidth;
+      captureCanvas.height = localVideo.videoHeight;
+      captureCtx.drawImage(localVideo, 0, 0);
+
+      captureCanvas.toBlob(async (blob) => {
+        if (!blob) { isSendingFrame = false; return; }
+        try {
+          const res = await fetch('/api/fall/frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'image/jpeg' },
+            body: blob
+          });
+          if (res.ok) {
+            const data = await res.json();
+            updateStatusUI(data.event);
+          }
+        } catch (err) {
+          console.warn("Frame upload error:", err);
+        } finally {
+          isSendingFrame = false;
+        }
+      }, 'image/jpeg', 0.7);
+    }
+
+    function switchMode(mode) {
+      activeMode = mode;
+      document.getElementById('btnModeWebcam').className = mode === 'webcam' ? 'active' : 'secondary';
+      document.getElementById('btnModePi').className = mode === 'pi' ? 'active' : 'secondary';
+
+      if (mode === 'webcam') {
+        mjpegImg.style.display = 'none';
+        mjpegImg.src = '';
+        startWebcam();
+      } else {
+        stopWebcam();
+        localVideo.style.display = 'none';
+        mjpegImg.src = '/api/fall/stream?t=' + Date.now();
+        mjpegImg.style.display = 'block';
+        resizeCanvas();
+      }
+    }
+
+    // Load initial ROI
+    fetch('/api/fall/roi').then(r => r.json()).then(data => {
+      if (data.polygon && data.polygon.length === 4) {
+        points = data.polygon.map(pt => ({x: pt[0], y: pt[1]}));
+        draw();
+      }
+    });
+
+    // Initialize MediaPipe Pose Client
+    initMediaPipePose();
+
+    // Update flip button label for default facing mode
+    (function syncFlipLabel() {
+      const btn = document.getElementById('btnFlipCam');
+      if (btn) {
+        btn.innerText = currentFacingMode === 'environment'
+          ? '🔄 Flip Camera (Rear)'
+          : '🔄 Flip Camera (Front/Selfie)';
+      }
+    })();
+
+    // Start camera once page is ready (single owner of the stream)
+    if (document.readyState === 'complete') {
+      startWebcam();
+    } else {
+      window.addEventListener('load', () => startWebcam());
+    }
+    setTimeout(resizeCanvas, 500);
+  </script>
+</body>
+</html>

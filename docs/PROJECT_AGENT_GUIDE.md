@@ -31,6 +31,7 @@
 | `medical_ble_toolkit/README.md` | HAL details + datasheet reuse matrix |
 | `medical_ble_toolkit/SUPPORT_MATRIX.md` | Support levels A–D per device family |
 | `medical_ble_web/README.md` | FastAPI routes |
+| `datasheets/FORA/FORA_FIRST_PARTY_PROTOCOL.md` | FORA/TaiDoc first-party BLE protocol |
 | `AGENTS.md` / `CLAUDE.md` | GitNexus workflow hooks |
 
 ---
@@ -173,7 +174,15 @@ Agents should treat these as **source of truth for protocol intent**. Runtime co
 
 | Path | Role |
 |------|------|
-| Brochure PDF only | **No wire protocol** → toolkit support stays **scaffold (level D)** until APK/HCI |
+| **`FORA_FIRST_PARTY_PROTOCOL.md`** | **Canonical** companion protocol (GATT, all cmds, timings, FSM, decode) |
+| **`EXACT_PROTOCOL_FROM_APK.json`** | Machine-readable constants from iFORA Smart 1.5.9 jadx |
+| `IFORA_SMART_APK_BLE_FINDINGS.md` | **Superseded** early string-mine notes — do not implement from this |
+| Brochure PDF | Product marketing only |
+| XAPK + `extracted/` (gitignored) | Decompiled sources + DEX dumps |
+
+**Stack:** TaiDoc bus over GATT `1523`/`1524`, PIN default `111111`, bond required.  
+**Runtime:** `brands/fora/protocol.py` + `session.py` + `plugin.py` (first-party host path).  
+**HCI still needed:** FORA 6 multiparam field packing per project code.
 
 ### 4.6 Phone HCI tools — `phoneblelog/`
 
@@ -275,7 +284,7 @@ Companion app on phone ↔ real device
 | `nipro_nt100b.py`, `nipro_cf.py`, `nipro_common.py` | Nipro companion frames |
 | `glucose.py` | Glucose service / Beurer glucose-oriented |
 | `beurer_ft.py`, `beurer_po60.py`, `beurer_scale.py`, `beurer_tracker.py`, `beurer_ecg.py` | Beurer non-BP families |
-| `fora.py` | FORA scaffold |
+| `fora.py` | FORA TaiDoc frame + BG parse (see brands/fora for session) |
 | `__init__.py` | Package |
 
 Facade: `medical_ble_toolkit/parser.py` maps profile ids → these factories.
@@ -325,6 +334,17 @@ Registration hub: **`brands/__init__.py`** imports every active brand plugin (Om
 | `post_measure.py` | Post-measure transfer helpers |
 | `profiles.py` | NBP / NMBP / NT / CF / etc. profile ids |
 
+#### FORA — `brands/fora/` (first-party TaiDoc bus)
+
+| File | Role |
+|------|------|
+| `protocol.py` | UUIDs, all MeterCommand templates, timings, getDataType map, datetime/serial decode |
+| `session.py` | Bleak connect → CCCD → companion import FSM |
+| `plugin.py` | DevicePlugin pair/run_session |
+| `profiles.py` | `fora6` profile (1523/1524, not subscribe-all) |
+
+Docs: `datasheets/FORA/FORA_FIRST_PARTY_PROTOCOL.md`. Reliability checklist is §0 of that file.
+
 #### Other brands (thinner)
 
 | Brand dir | Main files | Role |
@@ -332,7 +352,6 @@ Registration hub: **`brands/__init__.py`** imports every active brand plugin (Om
 | `masimo/` | `plugin.py` | MightySat stream class; delegates client/parser |
 | `and_/` | `plugin.py` | A&D UA-651BLE path |
 | `thermo/` | `plugin.py` | NT-100B / TICD lab path |
-| `fora/` | `plugin.py`, `profiles.py` | Scaffold until protocol known |
 
 ---
 

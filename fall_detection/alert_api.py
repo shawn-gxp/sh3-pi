@@ -1,12 +1,19 @@
 import logging
 import threading
-import datetime
+from datetime import datetime, timezone
 from typing import Optional
+
 import requests
 
 from . import config
 
 logger = logging.getLogger("FallAlertApi")
+
+
+def _utc_now_iso() -> str:
+    """Timezone-aware UTC ISO-8601 (datetime.utcnow is deprecated)."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
 
 def _post_event_task(
     patient_id: str,
@@ -22,7 +29,7 @@ def _post_event_task(
         "eventType": event_type,
         "severity": severity,
         "fallDetected": (event_type == "FALL_DETECTED"),
-        "detectedAt": datetime.datetime.utcnow().isoformat() + "Z",
+        "detectedAt": _utc_now_iso(),
         "sourceApp": "EdgeAiFallDetection",
         "deviceId": device_id,
         "cooldownMs": config.COOLDOWN_MS

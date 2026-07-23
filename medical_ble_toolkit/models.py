@@ -261,10 +261,11 @@ class ThermometerReading:
 @dataclass
 class MultiParameterReading:
     """
-    FORA 6 Connect scaffold.
+    FORA multi-parameter / glucose reading.
 
-    Brochure-only documentation in datasheets/FORA — no wire protocol yet.
-    Fields match product claims; parsers stay stubs until RE fills them in.
+    Protocol: TaiDoc bus over GATT 1523/1524 (iFORA Smart). See
+    datasheets/FORA/FORA_FIRST_PARTY_PROTOCOL.md. Multiparam fields beyond
+    BG may remain None until HCI validates packing per project code.
     """
     blood_glucose_mg_dl: Optional[float] = None
     hematocrit_pct: Optional[float] = None
