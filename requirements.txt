@@ -1,7 +1,10 @@
 bleak>=0.22.0
 paho-mqtt>=1.6.1
 
-# Fall detection is a *separate* sibling package fall_detection_pi — not part of sh3-pi.
-# Install from the monorepo / workspace root that contains both folders:
-#   pip install -e ../fall_detection_pi
-# Optional env: FALL_DETECTION_HOME=/path/to/fall_detection_pi
+# Fall detection is a *separate* sibling package (workspace root only):
+#   workspace/
+#     fall_detection_pi/
+#     sh3-pi/          ← this repo / folder
+# Install from workspace root:
+#   pip install -e ./fall_detection_pi
+# Optional env: FALL_DETECTION_HOME=/abs/path/to/fall_detection_pi

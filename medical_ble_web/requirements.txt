@@ -3,5 +3,5 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.0.0
 paho-mqtt>=1.6.1
 # BLE stack: bleak (repo root / toolkit requirements)
-# Fall detection: install sibling package separately
-#   pip install -e ../fall_detection_pi
+# Fall detection: sibling package only (not inside sh3-pi)
+# From workspace root:  pip install -e ./fall_detection_pi

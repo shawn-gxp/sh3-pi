@@ -1,12 +1,18 @@
 """
-Resolve the standalone `fall_detection_pi` package (sibling of sh3-pi, not nested).
+Resolve the standalone `fall_detection_pi` package.
+
+**Supported layout (sibling only):**
+
+    workspace/
+      fall_detection_pi/     # this package
+      sh3-pi/                # BLE hub (this file lives under medical_ble_web/)
 
 Search order:
-  1. Already importable (pip install -e ./fall_detection_pi)
-  2. FALL_DETECTION_HOME / FALL_DETECTION_PATH env → package directory
+  1. Already importable (pip install -e ./fall_detection_pi from workspace root)
+  2. FALL_DETECTION_HOME / FALL_DETECTION_PATH → absolute path to package dir
   3. Sibling of sh3-pi:  <workspace>/fall_detection_pi
-  4. Legacy names:       <workspace>/fall_detection  (old)
-  5. Legacy nested:      <sh3-pi>/fall_detection_pi or fall_detection
+
+Nested under sh3-pi is not supported for new deployments.
 """
 from __future__ import annotations
 
@@ -18,21 +24,15 @@ from typing import Optional
 
 log = logging.getLogger("medical_ble_web.fall_import")
 
-# medical_ble_web/ → sh3-pi/
+# medical_ble_web/ → sh3-pi/  (hub root)
 _SH3_ROOT = Path(__file__).resolve().parent.parent
 
-_PKG_NAMES = ("fall_detection_pi", "fall_detection")  # preferred first
+_PKG_NAME = "fall_detection_pi"
 
 
 def _try_import() -> bool:
     try:
         import fall_detection_pi  # noqa: F401
-
-        return True
-    except ImportError:
-        pass
-    try:
-        import fall_detection  # noqa: F401
 
         return True
     except ImportError:
@@ -47,7 +47,7 @@ def _add_parent_of_package(package_dir: Path) -> None:
 
 
 def ensure_fall_detection() -> bool:
-    """Make `import fall_detection_pi` (or legacy fall_detection) work."""
+    """Make `import fall_detection_pi` work (sibling layout)."""
     if _try_import():
         return True
 
@@ -57,12 +57,8 @@ def ensure_fall_detection() -> bool:
         if raw:
             candidates.append(Path(raw).expanduser())
 
-    # Sibling layout (preferred)
-    for name in _PKG_NAMES:
-        candidates.append(_SH3_ROOT.parent / name)
-    # Legacy nested under sh3-pi
-    for name in _PKG_NAMES:
-        candidates.append(_SH3_ROOT / name)
+    # Sibling of sh3-pi only
+    candidates.append(_SH3_ROOT.parent / _PKG_NAME)
 
     for cand in candidates:
         try:
@@ -75,7 +71,7 @@ def ensure_fall_detection() -> bool:
             continue
         _add_parent_of_package(root)
         if _try_import():
-            log.info("Using fall package from %s", root)
+            log.info("Using fall package from %s (sibling layout)", root)
             return True
 
     return False
@@ -83,37 +79,32 @@ def ensure_fall_detection() -> bool:
 
 def fall_detection_location() -> Optional[Path]:
     """Return filesystem path of the loaded package, if known."""
-    for mod_name in _PKG_NAMES:
-        try:
-            mod = __import__(mod_name)
-            return Path(mod.__file__).resolve().parent
-        except Exception:
-            continue
-    return None
+    try:
+        import fall_detection_pi
+
+        return Path(fall_detection_pi.__file__).resolve().parent
+    except Exception:
+        return None
 
 
 def import_camera_loop():
-    """Import camera_loop from fall_detection_pi (or legacy name)."""
+    """Import camera_loop from fall_detection_pi."""
     if not ensure_fall_detection():
-        raise ImportError("fall_detection_pi not found")
-    try:
-        from fall_detection_pi import camera_loop
+        raise ImportError(
+            "fall_detection_pi not found — place it as a sibling of sh3-pi "
+            "or set FALL_DETECTION_HOME / pip install -e ./fall_detection_pi"
+        )
+    from fall_detection_pi import camera_loop
 
-        return camera_loop
-    except ImportError:
-        from fall_detection import camera_loop
-
-        return camera_loop
+    return camera_loop
 
 
 def import_fall_config():
     if not ensure_fall_detection():
-        raise ImportError("fall_detection_pi not found")
-    try:
-        from fall_detection_pi import config
+        raise ImportError(
+            "fall_detection_pi not found — place it as a sibling of sh3-pi "
+            "or set FALL_DETECTION_HOME / pip install -e ./fall_detection_pi"
+        )
+    from fall_detection_pi import config
 
-        return config
-    except ImportError:
-        from fall_detection import config
-
-        return config
+    return config

@@ -29,47 +29,45 @@ hardening or MQTT work.
 
 ---
 
-## 2. Repository layout (why two packages)
+## 2. Repository layout — **sibling only**
 
-Fall detection is **not** a submodule of the BLE stack. Two layouts are supported:
-
-### A. Development repo (`shawn-gxp/sh3-pi`)
-
-Single clone for day-to-day work:
+Fall detection is **not** inside the BLE tree. The **only supported layout** is
+**siblings** under one workspace (or monorepo) root:
 
 ```
-sh3-pi/                          # git root
-├── fall_detection_pi/           # CV package (import fall_detection_pi)
-├── medical_ble_web/             # FastAPI hub UI + /api/fall/*
-├── medical_ble_toolkit/         # BLE brands
-└── docs/FALL_DETECTION.md       # this file
-```
-
-`medical_ble_web/fall_import.py` finds the package under the hub root
-(`…/sh3-pi/fall_detection_pi`).
-
-### B. Monorepo (`gxpindia/SHHMHub`, branch `feature/H1.5.2-fall-detection`)
-
-```
-SHHMHub/
-├── fall_detection_pi/           # sibling of sh3-pi
-├── sh3-pi/                      # BLE hub only (no nested fall package)
-├── edge-ai-fall-detection/      # Android Kotlin reference
+workspace/   (e.g. SHHMHub/ clone root)
+├── fall_detection_pi/           # CV package  →  import fall_detection_pi
+├── sh3-pi/                      # BLE hub only
+│   ├── medical_ble_web/         # FastAPI + fall_import + /api/fall/*
+│   ├── medical_ble_toolkit/
+│   └── docs/FALL_DETECTION.md   # this file
+├── edge-ai-fall-detection/      # Android Kotlin reference (SHHMHub)
 └── …
 ```
 
-`fall_import` finds `../fall_detection_pi` relative to `sh3-pi/`.
+| Path | Role |
+|------|------|
+| `fall_detection_pi/` | All pose / fall rules / camera loop |
+| `sh3-pi/` | BLE, SQLite, MQTT, web UI — **no** fall package folder inside |
 
-### Why split
+How the hub finds the package (`medical_ble_web/fall_import.py`):
+
+1. Already on `PYTHONPATH` / `pip install -e ./fall_detection_pi`
+2. `FALL_DETECTION_HOME` env → absolute path to the package directory
+3. **Sibling of `sh3-pi`:** `<workspace>/fall_detection_pi`  
+   (i.e. parent of the hub root + `/fall_detection_pi`)
+
+**Do not** put the package at `sh3-pi/fall_detection_pi/` or `sh3-pi/fall_detection/`.
+That nested layout is **unsupported** for SHHMHub and for new work.
+
+### Why split (and keep sibling)
 | Reason | Detail |
 |--------|--------|
 | Ownership | Fall CV vs multi-brand BLE evolve at different rates |
 | Deploy | Hub can run BLE without MediaPipe installed |
 | Clear imports | `import fall_detection_pi` vs toolkit brands |
 | Milestone mapping | Aligns with H1.5.x fall tasks vs H1.1–H1.4 BLE |
-
-**Do not** re-nest modern fall code under `sh3-pi/fall_detection` in SHHMHub.
-
+| Monorepo clarity | SHHMHub top-level folders are product modules |
 ---
 
 ## 3. End-to-end pipeline
@@ -335,7 +333,7 @@ Priority order in code:
 | `fall_detection_pi/pose_model.py` | Download/cache `.task` model |
 | `fall_detection_pi/config.py` | Env + hub_config ROI load/save path |
 | `fall_detection_pi/alert_api.py` | Async HTTP POST to backend |
-| `medical_ble_web/fall_import.py` | Locate package (nested or sibling) |
+| `medical_ble_web/fall_import.py` | Locate **sibling** package `fall_detection_pi` |
 | `medical_ble_web/app.py` | Lifespan camera thread + `/api/fall/*` |
 | `medical_ble_web/static/fall.html` | ROI draw + phone pose + status banner |
 
@@ -490,19 +488,27 @@ Default patient id → **skip publish** (log warning only).
 
 ## 12. How to run (development)
 
-### Install (dev repo root = `sh3-pi`)
+Assume **sibling** layout. All commands from the **workspace root** (folder that
+contains both `fall_detection_pi/` and `sh3-pi/`), e.g. the SHHMHub clone root.
+
+### Install
 
 ```bash
-pip install -r requirements.txt
-pip install -r medical_ble_web/requirements.txt
-pip install -r fall_detection_pi/requirements.txt
-# optional editable:
-# pip install -e ./fall_detection_pi
+# Workspace root
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+source .venv/bin/activate   # Linux/Pi
+
+pip install -r sh3-pi/requirements.txt
+pip install -r sh3-pi/medical_ble_web/requirements.txt
+pip install -e ./fall_detection_pi
+# or: pip install -r fall_detection_pi/requirements.txt
 ```
 
 ### Unit tests (no camera)
 
 ```bash
+# Workspace root — parent of fall_detection_pi must be on PYTHONPATH
 set PYTHONPATH=.
 python -m pytest fall_detection_pi/tests/test_fall_detector.py -v
 python fall_detection_pi/tests/_tryout_sim.py
@@ -511,13 +517,15 @@ python fall_detection_pi/tests/_tryout_sim.py
 ### Hub + SSL
 
 ```bash
-cd medical_ble_web
+cd sh3-pi/medical_ble_web
+# so fall_import can resolve ../../fall_detection_pi and import hub modules
 set PYTHONPATH=..;.;../..
 python app.py --ssl
 ```
 
 - UI: `https://127.0.0.1:8741/static/fall.html`  
-- Status: `GET /api/fall/status`  
+- Status: `GET /api/fall/status` → `"package": "fall_detection_pi"` and a path  
+  ending in `…/fall_detection_pi` (sibling of `sh3-pi`, not under it).  
 
 ### Enable backend alerts
 

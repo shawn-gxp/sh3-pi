@@ -32,8 +32,8 @@
 | `medical_ble_toolkit/SUPPORT_MATRIX.md` | Support levels A–D per device family |
 | `medical_ble_web/README.md` | FastAPI routes |
 | `datasheets/FORA/FORA_FIRST_PARTY_PROTOCOL.md` | FORA/TaiDoc first-party BLE protocol |
-| `docs/FALL_DETECTION.md` | Fall CV design, math, API, reliability (package `fall_detection_pi`) |
-| `fall_detection_pi/README.md` | Short install for fall package |
+| `docs/FALL_DETECTION.md` | Fall CV design, math, API (package `fall_detection_pi`, **sibling** of `sh3-pi`) |
+| `../fall_detection_pi/README.md` | Short install (monorepo root sibling; never nested under `sh3-pi/`) |
 | `AGENTS.md` / `CLAUDE.md` | GitNexus workflow hooks |
 
 ---
@@ -211,7 +211,9 @@ Companion app on phone ↔ real device
 ## 5. Runtime HAL — `medical_ble_toolkit/`
 
 **Role:** Standalone multi-brand BLE hardware layer.  
-**Rule:** `medical_ble_web` depends **only** on this package (no sibling packages).
+**Rule:** `medical_ble_web` depends on this toolkit for BLE. Fall CV is an optional
+**sibling** package `fall_detection_pi` (resolved by `fall_import.py`), never nested
+inside this tree.
 
 ### 5.1 Package entrypoints (top level)
 
