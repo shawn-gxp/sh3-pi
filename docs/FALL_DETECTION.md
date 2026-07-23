@@ -1,8 +1,28 @@
 # Fall Detection Architecture
 
 Computer-vision fall detection for the Raspberry Pi Hub. Logic evolved from the Android
-Kotlin port (`edge-ai-fall-detection`) with polygon ROI, temporal voting, and rapid-drop
-velocity checks.
+Kotlin port (`edge-ai-fall-detection`) with polygon ROI and dual fall paths.
+
+## Package separation
+
+**`fall_detection_pi` is a standalone package** — not nested under `sh3-pi`.
+
+```
+workspace/   (e.g. SHHMHub/ or Desktop/pi python/)
+├── fall_detection_pi/       # this package (pip install -e ./fall_detection_pi)
+└── sh3-pi/                  # BLE hub + medical_ble_web
+    └── medical_ble_web/     # optional consumer via fall_import.py
+```
+
+Install:
+
+```bash
+pip install -e ./fall_detection_pi
+# or set FALL_DETECTION_HOME=/abs/path/to/fall_detection_pi
+```
+
+Hub resolves the package via sibling path or that env var. BLE hub runs fine if fall
+is missing; `/api/fall/*` returns 503 until installed. See `GET /api/fall/status`.
 
 ## Pipeline Overview
 
@@ -15,21 +35,23 @@ camera required).
    - Remote: `POST /api/fall/frame` (JPEG) or `POST /api/fall/landmarks` (33 keypoints / named dict)
 2. **Pose inference** (camera/frame paths only): **MediaPipe Tasks** `PoseLandmarker` → 33 landmarks  
    (not the removed `mp.solutions.pose` Solutions API)
-3. **Rules engine** (`fall_detection/fall_detector.py`): polygon ROI + posture + velocity + temporal voting
+3. **Rules engine** (`fall_detection_pi/fall_detector.py`): polygon ROI + posture + velocity
 4. **Alerting** (`alert_api.py`): rate-limited HTTP POST to backend; local alarm hooks (stubs)
 
 ## Module Map
 
 | Path | Role |
 |------|------|
-| `fall_detection/config.py` | Env overrides, ROI load, pose model path/URL |
-| `fall_detection/pose_model.py` | Auto-download `pose_landmarker_*.task` on first use |
-| `fall_detection/fall_detector.py` | `PolygonROI`, `FallDetector`, `DetectionState` |
-| `fall_detection/camera_loop.py` | PoseLandmarker (IMAGE/VIDEO), frame/landmarks handlers |
-| `fall_detection/alert_api.py` | Background `POST …/fall-events` |
-| `medical_ble_web/app.py` | `/api/fall/*` routes + ROI persist |
-| `medical_ble_web/static/fall.html` | ROI calibration + phone/browser camera UI |
-| `fall_detection/tests/test_fall_detector.py` | Unit tests (no camera) |
+| `fall_detection_pi/` (sibling package) | All CV logic |
+| `fall_detection_pi/config.py` | Env overrides, ROI load, pose model path/URL |
+| `fall_detection_pi/pose_model.py` | Auto-download `pose_landmarker_*.task` on first use |
+| `fall_detection_pi/fall_detector.py` | `PolygonROI`, `FallDetector`, `DetectionState` |
+| `fall_detection_pi/camera_loop.py` | PoseLandmarker (IMAGE/VIDEO), frame/landmarks handlers |
+| `fall_detection_pi/alert_api.py` | Background `POST …/fall-events` |
+| `sh3-pi/medical_ble_web/fall_import.py` | Resolves sibling package on hub boot |
+| `sh3-pi/medical_ble_web/app.py` | `/api/fall/*` routes + ROI persist |
+| `sh3-pi/medical_ble_web/static/fall.html` | ROI calibration + phone/browser camera UI |
+| `fall_detection_pi/tests/test_fall_detector.py` | Unit tests (no camera) |
 
 ## Vision stack (current)
 
@@ -38,14 +60,14 @@ camera required).
 | `mediapipe>=0.10.30` | **Required** — Tasks API only (`PoseLandmarker`) |
 | `mp.solutions.pose` | **Removed** in modern mediapipe — do not use |
 | OpenCV | Brought in by mediapipe (`opencv-contrib-python`) |
-| Model file | `fall_detection/models/pose_landmarker_lite.task` (auto-download) |
+| Model file | `fall_detection_pi/models/pose_landmarker_lite.task` (auto-download) |
 
 Env for models:
 
 | Env | Default | Notes |
 |-----|---------|-------|
 | `FALL_POSE_MODEL` | `lite` | `lite` \| `full` \| `heavy` |
-| `FALL_POSE_MODEL_PATH` | `fall_detection/models/pose_landmarker_<variant>.task` | Skip download if file exists |
+| `FALL_POSE_MODEL_PATH` | `fall_detection_pi/models/pose_landmarker_<variant>.task` | Skip download if file exists |
 | `FALL_POSE_MODEL_URL` | Google CDN for chosen variant | Override download URL |
 
 Running modes:
@@ -140,7 +162,7 @@ Posts run on a daemon thread so the camera loop is not blocked.
 ### 1. Unit tests (no deps beyond pytest)
 
 ```bash
-python -m pytest fall_detection/tests/test_fall_detector.py -v
+python -m pytest fall_detection_pi/tests/test_fall_detector.py -v
 ```
 
 ### 2. Landmarks simulation (no camera)
@@ -148,7 +170,7 @@ python -m pytest fall_detection/tests/test_fall_detector.py -v
 ```bash
 # from repo root
 set PYTHONPATH=.
-python fall_detection/tests/_tryout_sim.py
+python fall_detection_pi/tests/_tryout_sim.py
 ```
 
 Covers IN BED → NEAR EDGE → LEFT BED → FALL via `process_normalized_landmarks`.
@@ -193,7 +215,7 @@ Repeat 2–3 times to confirm `in_safe_area` (temporal voting).
 
 ## Tests
 
-`fall_detection/tests/test_fall_detector.py` covers:
+`fall_detection_pi/tests/test_fall_detector.py` covers:
 
 - polygon contains + signed distance
 - inside / fall / left_bed / near_edge temporal behaviour

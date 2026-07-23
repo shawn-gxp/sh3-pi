@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Large MediaPipe models (auto-downloaded on first pose run)
+models/*.task
+models/*.partial
+
+# Local overrides
+hub_config.json
+.env

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import time
 
-from fall_detection import camera_loop, config
-from fall_detection.fall_detector import FallDetector
+from fall_detection_pi import camera_loop, config
+from fall_detection_pi.fall_detector import FallDetector
 
 
 def lm(sx, hy, xo, horiz=False):

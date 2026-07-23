@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-_EXP = ROOT.parent
+_EXP = ROOT.parent  # sh3-pi package root
 if str(_EXP) not in sys.path:
     sys.path.insert(0, str(_EXP))
 
@@ -43,6 +43,12 @@ from ble_jobs import (  # noqa: E402
     provide_pair_passkey,
     subscribe_live,
     unsubscribe_live,
+)
+from fall_import import (  # noqa: E402
+    ensure_fall_detection,
+    fall_detection_location,
+    import_camera_loop,
+    import_fall_config,
 )
 
 logging.basicConfig(
@@ -76,20 +82,29 @@ async def lifespan(app: FastAPI):
             log.info("No paired devices yet — pair a device to begin.")
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not auto-start daemon: %s", exc)
-    try:
-        import threading
-        from fall_detection import camera_loop
-        thread = threading.Thread(target=camera_loop.run, daemon=True)
-        thread.start()
-        log.info("Fall detection camera loop started in background")
-    except Exception as exc:
-        log.warning("Could not start fall detection: %s", exc)
+    # Fall detection is a *sibling* package fall_detection_pi (not inside sh3-pi)
+    if ensure_fall_detection():
+        try:
+            import threading
+
+            camera_loop = import_camera_loop()
+            thread = threading.Thread(target=camera_loop.run, daemon=True)
+            thread.start()
+            log.info("Fall detection (fall_detection_pi) camera loop started")
+        except Exception as exc:
+            log.warning("Could not start fall detection: %s", exc)
+    else:
+        log.warning(
+            "fall_detection_pi package not found — install sibling package "
+            "(pip install -e ../fall_detection_pi) or set FALL_DETECTION_HOME. "
+            "Hub BLE features still work; /api/fall/* will error until installed."
+        )
 
     yield
 
     try:
-        from fall_detection import camera_loop
-        camera_loop.stop()
+        if ensure_fall_detection():
+            import_camera_loop().stop()
     except Exception:
         pass
 
@@ -150,85 +165,115 @@ class PatientSetting(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Fall Detection API Routes
+# Fall Detection API Routes (optional sibling package)
 # ---------------------------------------------------------------------------
 
 from fastapi.responses import StreamingResponse
+from fastapi import Request
+
+
+def _require_fall():
+    if not ensure_fall_detection():
+        raise HTTPException(
+            503,
+            "fall_detection_pi package not installed. "
+            "pip install -e ../fall_detection_pi or set FALL_DETECTION_HOME",
+        )
+
 
 @app.get("/api/fall/stream")
 async def fall_stream():
     """Live MJPEG stream of the camera feed with pose overlay."""
+    _require_fall()
+    camera_loop = import_camera_loop()
+
     def generate():
         import time
-        from fall_detection import camera_loop
+
         while True:
             jpeg = camera_loop.get_latest_jpeg()
             if jpeg:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg + b'\r\n')
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+                )
             time.sleep(0.04)  # ~25 FPS
+
     return StreamingResponse(
         generate(), media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
+
 @app.get("/api/fall/roi")
 async def fall_roi_get() -> Dict[str, Any]:
     """Get the current bed boundary polygon."""
-    from fall_detection import camera_loop
-    return {"ok": True, "polygon": camera_loop.get_active_polygon()}
+    _require_fall()
+    return {"ok": True, "polygon": import_camera_loop().get_active_polygon()}
+
 
 class PolygonBody(BaseModel):
     polygon: List[Dict[str, float]]
 
+
 @app.post("/api/fall/roi")
 async def fall_roi_post(body: PolygonBody) -> Dict[str, Any]:
-    """Set the bed boundary polygon (expects 4 points, normalized 0.0-1.0)."""
+    """Set the bed boundary polygon (expects ≥3 points, normalized 0.0-1.0)."""
+    _require_fall()
     if len(body.polygon) < 3:
         raise HTTPException(400, "Polygon must have at least 3 points")
-    
-    # Convert to list of tuples
+
     new_polygon = [(pt["x"], pt["y"]) for pt in body.polygon]
-    
-    # Update active detector instantly
-    from fall_detection import camera_loop
-    camera_loop.update_polygon(new_polygon)
-    
-    # Persist ROI to repo-root hub_config.json (same file config.py loads)
+    import_camera_loop().update_polygon(new_polygon)
+
     try:
         import json
-        from fall_detection.config import hub_config_path
 
-        cfg_path = hub_config_path()
+        cfg_path = import_fall_config().hub_config_path()
         cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.is_file() else {}
+        # hub_config key stays fall_detection for existing configs
         if "fall_detection" not in cfg:
             cfg["fall_detection"] = {}
         cfg["fall_detection"]["polygon"] = new_polygon
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
         cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     except Exception as exc:
         log.warning("Could not persist ROI to hub_config.json: %s", exc)
 
     return {"ok": True, "polygon": new_polygon}
 
-from fastapi import Request
 
 @app.post("/api/fall/frame")
 async def fall_frame_post(request: Request) -> Dict[str, Any]:
     """Receives a JPEG frame uploaded from browser/phone camera and runs fall detection."""
+    _require_fall()
     data = await request.body()
     if not data:
         raise HTTPException(400, "Empty image body")
-    from fall_detection import camera_loop
-    return camera_loop.process_client_frame(data)
+    return import_camera_loop().process_client_frame(data)
+
 
 class LandmarksBody(BaseModel):
     landmarks: Any
 
+
 @app.post("/api/fall/landmarks")
 async def fall_landmarks_post(body: LandmarksBody) -> Dict[str, Any]:
-    """Receives normalized skeletal landmark points (33 MediaPipe keypoints or dict) and evaluates fall detection."""
-    from fall_detection import camera_loop
-    return camera_loop.process_normalized_landmarks(body.landmarks)
+    """Receives normalized skeletal landmark points and evaluates fall detection."""
+    _require_fall()
+    return import_camera_loop().process_normalized_landmarks(body.landmarks)
 
+
+@app.get("/api/fall/status")
+async def fall_status() -> Dict[str, Any]:
+    """Whether the sibling fall_detection_pi package is available."""
+    ok = ensure_fall_detection()
+    p = fall_detection_location() if ok else None
+    return {
+        "ok": ok,
+        "package": "fall_detection_pi",
+        "package_path": str(p) if p else None,
+        "separate_package": True,
+    }
 
 # ---------------------------------------------------------------------------
 # Standard Web UI Routes

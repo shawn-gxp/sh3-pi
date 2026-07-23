@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from fall_detection.fall_detector import FallDetector, NormalizedPoint, PolygonROI
+from fall_detection_pi.fall_detector import FallDetector, NormalizedPoint, PolygonROI
 
 
 def create_mock_landmarks(
@@ -165,7 +165,7 @@ def test_no_roi():
 
 
 def test_process_landmarks_api_path():
-    from fall_detection import camera_loop
+    from fall_detection_pi import camera_loop
 
     camera_loop.fall_detector = FallDetector()
     camera_loop.update_polygon([(0.2, 0.2), (0.8, 0.2), (0.8, 0.6), (0.2, 0.6)])
@@ -183,7 +183,7 @@ def test_process_landmarks_api_path():
 
 
 def test_process_landmarks_json_dict_path():
-    from fall_detection import camera_loop
+    from fall_detection_pi import camera_loop
 
     camera_loop.fall_detector = FallDetector()
     camera_loop.update_polygon([(0.2, 0.2), (0.8, 0.2), (0.8, 0.6), (0.2, 0.6)])
@@ -198,7 +198,7 @@ def test_process_landmarks_json_dict_path():
 
 
 def test_config_loads_hub_polygon():
-    from fall_detection import config
+    from fall_detection_pi import config
 
     assert len(config.DEFAULT_POLYGON) >= 3
     assert config.hub_config_path().name == "hub_config.json"
@@ -206,7 +206,7 @@ def test_config_loads_hub_polygon():
 
 
 def test_vision_stack_flags():
-    from fall_detection import camera_loop
+    from fall_detection_pi import camera_loop
 
     assert isinstance(camera_loop.HAVE_CV2, bool)
     assert isinstance(camera_loop.HAVE_POSE, bool)
@@ -215,7 +215,7 @@ def test_vision_stack_flags():
 
 
 def test_pose_landmarks_to_dict_indices():
-    from fall_detection.camera_loop import pose_landmarks_to_dict
+    from fall_detection_pi.camera_loop import pose_landmarks_to_dict
 
     class LM:
         def __init__(self, i):

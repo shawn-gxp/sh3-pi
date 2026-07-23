@@ -4,11 +4,11 @@ The 1:1 port of the Android Kotlin fall detection logic to the Raspberry Pi Hub 
 
 ## 1. Logic Ported (1:1)
 
-- **`fall_detection/fall_detector.py`**: Pure logic port of `FallDetector.kt` and `RectFNorm`. 
-- **`fall_detection/config.py`**: Hardcoded constants ported straight from `FallAlertConfig.kt` and `CameraFragment`.
-- **`fall_detection/alert_api.py`**: Background thread API caller ported from `FallAlertApi.kt`.
-- **`fall_detection/camera_loop.py`**: OpenCV + **MediaPipe Tasks `PoseLandmarker`** (not legacy `mp.solutions.pose`) replacing Android `CameraFragment`, same state machine/API rules.
-- **`fall_detection/pose_model.py`**: Auto-downloads `pose_landmarker_*.task` from Google's CDN on first run.
+- **`fall_detection_pi/fall_detector.py`**: Pure logic port of `FallDetector.kt` and `RectFNorm`. 
+- **`fall_detection_pi/config.py`**: Hardcoded constants ported straight from `FallAlertConfig.kt` and `CameraFragment`.
+- **`fall_detection_pi/alert_api.py`**: Background thread API caller ported from `FallAlertApi.kt`.
+- **`fall_detection_pi/camera_loop.py`**: OpenCV + **MediaPipe Tasks `PoseLandmarker`** (not legacy `mp.solutions.pose`) replacing Android `CameraFragment`, same state machine/API rules.
+- **`fall_detection_pi/pose_model.py`**: Auto-downloads `pose_landmarker_*.task` from Google's CDN on first run.
 
 ### Note on the "Alarm Hook"
 

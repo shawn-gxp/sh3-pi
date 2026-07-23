@@ -1,11 +1,12 @@
 # Fall detection config — env-overridable for deploy without editing code.
+# Package is standalone (sibling of sh3-pi), not nested inside the BLE hub.
 
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # Backend alert sink (optional — skipped if PATIENT_ID not set)
 BACKEND_BASE_URL = os.environ.get(
@@ -36,8 +37,9 @@ if POSE_MODEL_VARIANT not in _MODEL_FILES:
     POSE_MODEL_VARIANT = "lite"
 
 _PKG_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _PKG_DIR.parent
 _MODELS_DIR = _PKG_DIR / "models"
+# Workspace root = parent of this package (sibling of sh3-pi when laid out correctly)
+_WORKSPACE_ROOT = _PKG_DIR.parent
 
 # Official Google-hosted MediaPipe Tasks models (float16)
 _MODEL_URLS = {
@@ -58,7 +60,6 @@ _MODEL_URLS = {
 POSE_MODEL_URL = os.environ.get(
     "FALL_POSE_MODEL_URL", _MODEL_URLS[POSE_MODEL_VARIANT]
 )
-# Override path, else fall_detection/models/<variant>.task
 _default_model_path = _MODELS_DIR / _MODEL_FILES[POSE_MODEL_VARIANT]
 POSE_MODEL_PATH = Path(
     os.environ.get("FALL_POSE_MODEL_PATH", str(_default_model_path))
@@ -71,7 +72,7 @@ try:
 except ValueError:
     CAMERA_SOURCE = _cam
 
-# Default bed ROI (normalized 0–1). Prefer hub_config.json at repo root.
+# Default bed ROI (normalized 0–1)
 DEFAULT_POLYGON: List[Tuple[float, float]] = [
     (0.1, 0.1),
     (0.9, 0.1),
@@ -79,17 +80,24 @@ DEFAULT_POLYGON: List[Tuple[float, float]] = [
     (0.1, 0.9),
 ]
 
-# fall_detection/config.py → repo root is parent.parent
-_HUB_CONFIG_CANDIDATES = [
-    _REPO_ROOT / "hub_config.json",
-    Path(os.environ["FALL_HUB_CONFIG"]) if os.environ.get("FALL_HUB_CONFIG") else None,
-    _REPO_ROOT / "medical_ble_toolkit" / "hub_config.json",
-]
+
+def _hub_config_candidates() -> List[Optional[Path]]:
+    """Where bed ROI may live (package is not inside sh3-pi)."""
+    return [
+        Path(os.environ["FALL_HUB_CONFIG"]) if os.environ.get("FALL_HUB_CONFIG") else None,
+        # sibling hub checkouts
+        _WORKSPACE_ROOT / "sh3-pi" / "hub_config.json",
+        _WORKSPACE_ROOT / "hub_config.json",
+        # package-local override
+        _PKG_DIR / "hub_config.json",
+        # legacy nested layout (if someone still vendors it)
+        _WORKSPACE_ROOT / "sh3-pi" / "medical_ble_toolkit" / "hub_config.json",
+    ]
 
 
 def _load_polygon_from_hub() -> None:
     global DEFAULT_POLYGON
-    for path in _HUB_CONFIG_CANDIDATES:
+    for path in _hub_config_candidates():
         if path is None or not path.is_file():
             continue
         try:
@@ -106,9 +114,23 @@ _load_polygon_from_hub()
 
 
 def hub_config_path() -> Path:
-    """Path used by web API to persist ROI (repo-root hub_config.json)."""
-    return _REPO_ROOT / "hub_config.json"
+    """
+    Path used by web API to persist ROI.
+    Prefers existing hub_config.json; otherwise writes beside sibling sh3-pi.
+    """
+    for path in _hub_config_candidates():
+        if path is not None and path.is_file():
+            return path
+    # Default create location: sibling sh3-pi if present, else package dir
+    sibling = _WORKSPACE_ROOT / "sh3-pi" / "hub_config.json"
+    if (_WORKSPACE_ROOT / "sh3-pi").is_dir():
+        return sibling
+    return _PKG_DIR / "hub_config.json"
 
 
 def models_dir() -> Path:
     return _MODELS_DIR
+
+
+def package_dir() -> Path:
+    return _PKG_DIR

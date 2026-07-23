@@ -3,7 +3,5 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.0.0
 paho-mqtt>=1.6.1
 # BLE stack: bleak (repo root / toolkit requirements)
-# Fall detection vision stack (MediaPipe Tasks API — not legacy solutions.pose)
-mediapipe>=0.10.30
-numpy>=1.26.0
-requests>=2.31.0
+# Fall detection: install sibling package separately
+#   pip install -e ../fall_detection_pi

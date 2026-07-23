@@ -1,9 +1,7 @@
 bleak>=0.22.0
 paho-mqtt>=1.6.1
 
-# Fall detection (MediaPipe Tasks PoseLandmarker + OpenCV)
-# mediapipe pulls opencv-contrib-python — do not also pin opencv-python-headless
-# (conflicting OpenCV packages break imports).
-mediapipe>=0.10.30
-numpy>=1.26.0
-requests>=2.31.0
+# Fall detection is a *separate* sibling package fall_detection_pi — not part of sh3-pi.
+# Install from the monorepo / workspace root that contains both folders:
+#   pip install -e ../fall_detection_pi
+# Optional env: FALL_DETECTION_HOME=/path/to/fall_detection_pi
