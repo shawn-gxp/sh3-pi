@@ -478,6 +478,63 @@ job_live_stop / silence → auto-reconnect policy in ble_jobs
 | WINDOWED | NBP, NT-100B | Short ad window → dump → disconnect |
 | ALWAYS | Omron | Opportunistic or polled history; recoverable |
 
+### 8.6 Device Connection Workflows
+
+These diagrams illustrate how the Hub daemon interacts with the three main device classes.
+
+#### 1. WINDOWED Class (e.g., Nipro NT-100B Thermometer)
+*These devices only broadcast for a few seconds immediately after a measurement. The hub must connect fast.*
+```mermaid
+sequenceDiagram
+    participant Hub
+    participant NT100B as NT-100B (Thermometer)
+    Note over NT100B: User takes measurement
+    NT100B->>Hub: BLE Advertisement (Broadcasts for ~6s)
+    Hub->>Hub: HubDaemon detects MAC immediately
+    Hub->>NT100B: Connect
+    Hub->>NT100B: Enable 0x1524 (TICD) Notifications
+    NT100B-->>Hub: Send measurement frame (8 bytes)
+    Hub->>Hub: Parser decodes to ThermometerReading
+    Hub->>NT100B: Disconnect & Yield Radio
+    Note over Hub: Syncs to SQLite / MQTT
+```
+
+#### 2. STREAM Class (e.g., Masimo MightySat Rx)
+*These devices stream data continuously while worn. The hub uses a duty cycle to capture data then frees the radio.*
+```mermaid
+sequenceDiagram
+    participant Hub
+    participant MightySat
+    Note over MightySat: User puts on device
+    MightySat->>Hub: BLE Advertisement
+    Hub->>MightySat: Connect
+    Hub->>MightySat: Enable indications on Masimo characteristic
+    loop Duty Cycle (e.g. capture 5 valid frames)
+        MightySat-->>Hub: Stream continuous SpO2/Pulse chunks
+        Hub->>Hub: Accumulate buffer & CRC check
+    end
+    Hub->>MightySat: Disconnect & Yield Radio
+    Note over Hub: Averages vitals, Syncs to SQLite / MQTT
+```
+
+#### 3. ALWAYS Class (e.g., Omron BP)
+*These devices can be connected to at almost any time (if not asleep). The hub polls them periodically.*
+```mermaid
+sequenceDiagram
+    participant Hub
+    participant Omron as Omron BP
+    Note over Hub: HubDaemon triggers periodic timer (e.g., every 2 hrs)
+    Hub->>Omron: Scan & Connect
+    Hub->>Omron: Enable Notifications (FE4A Custom Service)
+    Hub->>Omron: Send Unlock Token Challenge
+    Omron-->>Hub: Accept Token
+    Hub->>Omron: Request History (EEPROM Read)
+    Omron-->>Hub: Send binary record layout stream
+    Hub->>Hub: Parse EEPROM slots to BloodPressureReadings
+    Hub->>Omron: Disconnect
+    Note over Hub: Syncs to SQLite / MQTT
+```
+
 ---
 
 ## 9. Agent edit rules (safe / unsafe)
