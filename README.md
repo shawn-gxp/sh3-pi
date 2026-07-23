@@ -5,8 +5,8 @@ Tools for **finding, pairing, and reading** smart medical devices over
 
 | Platform | Docs | Launch |
 |----------|------|--------|
-| **Linux / Pi** | [LINUX.md](LINUX.md) | `./setup_linux.sh` → `./start_hub.sh` (or `./run_web.sh`) |
-| **Windows** | below | `.\run_web.ps1` / `python -m medical_ble_toolkit` |
+| **Linux / Pi** | [LINUX.md](LINUX.md) | `scripts/deploy/setup_linux.sh` → `scripts/deploy/start_hub.sh` (or `scripts/dev/run_web.sh`) |
+| **Windows** | below | `scripts\dev\run_web.ps1` / `python -m medical_ble_toolkit` |
 | **Execution plan** | [EXECUTION_PLAN.md](EXECUTION_PLAN.md) | Phased Pi hub production work |
 
 ## Active layout
@@ -17,22 +17,22 @@ Tools for **finding, pairing, and reading** smart medical devices over
 | `medical_ble_web/` | FastAPI UI → http://127.0.0.1:8741 (depends **only** on toolkit) |
 | `datasheets/` | Protocol PDFs, architecture notes (reference only — not a runtime dep) |
 | `phoneblelog/` | Omron HCI findings + btsnoop helpers |
-| `ble_discover_loop.py` | Optional continuous AD watch (Linux debug) |
+| `tools/standalone/` | Optional continuous AD watch tools (`ble_discover_loop.py` etc) |
 
 Hub timings: `medical_ble_toolkit/hub_config.json` (or `$MEDICAL_HUB_CONFIG`).
 
 ## Linux quick start
 
 ```bash
-./setup_linux.sh
-./start_hub.sh        # BLE on + web on LAN → http://<pi-ip>:8741
+./scripts/deploy/setup_linux.sh
+./scripts/deploy/start_hub.sh        # BLE on + web on LAN → http://<pi-ip>:8741
 # boot without login (once):
-sudo ./install_boot_service.sh
+sudo ./scripts/deploy/install_boot_service.sh
 # or:
-./run_web.sh          # same; HOST=127.0.0.1 for local-only
+./scripts/dev/run_web.sh          # same; HOST=127.0.0.1 for local-only
 # optional CLI:
-./run_toolkit.sh
-./setup_bluez_hub.sh  # BlueZ agent / hub helpers
+./scripts/dev/run_toolkit.sh
+./scripts/deploy/setup_bluez_hub.sh  # BlueZ agent / hub helpers
 ```
 
 Hub Auto-sync: Pair devices on this host only → leave hub running → measure.
@@ -57,7 +57,7 @@ Logic from those projects lives in `medical_ble_toolkit/` (Omron under `medical_
 ```powershell
 python -m pip install -r requirements.txt
 python -m pip install -r medical_ble_web\requirements.txt
-.\run_web.ps1
+.\scripts\dev\run_web.ps1
 # or:
 python -m medical_ble_toolkit
 python -m medical_ble_toolkit omron pair -d HEM-7143T1 -a E1:99:7D:27:1C:0A
@@ -67,4 +67,4 @@ python -m medical_ble_toolkit omron pair -d HEM-7143T1 -a E1:99:7D:27:1C:0A
 
 - **One host bond only** for Omron / Nipro / MightySat — unpair the phone companion first.
 - SQLite POC DB: `medical_ble_web/data/poc.db`
-- Paired device lists: `nipro_paired_devices.json`, web UI device DB
+- Paired device lists: managed via web UI device DB (SQLite)
