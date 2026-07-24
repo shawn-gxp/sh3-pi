@@ -31,15 +31,8 @@ datasheets/**/tools/
 *.jar
 *.jmod
 
-# Local runtime data (device DBs, secrets on site)
-medical_ble_web/data/*.db
-medical_ble_web/data/*.db-*
-medical_ble_web/data/*.db-wal
-medical_ble_web/data/*.db-shm
-medical_ble_web/data/*_state.json
-*.pem
-*.csv
-hub_config.json
-__pycache__/
-*.pyc
+# Local runtime data (committed for dev/test per request)
+#__pycache__/
+#*.pyc
+
 
