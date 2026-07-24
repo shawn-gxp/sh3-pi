@@ -24,6 +24,7 @@ from medical_ble_toolkit.parsers.nipro_common import (
     PREFIX_MIGHTY,
     PREFIX_NBCM,
     PREFIX_NBP,
+    PREFIX_NC1,
     PREFIX_NMBP,
     PREFIX_NSM,
     PREFIX_NT100B,
@@ -44,6 +45,7 @@ CATEGORY_PROFILE = {
     "gl": "nipro_cf",
     "bc": "nipro_nbcm",  # future
     "spo2": "mightysat",
+    "ecg": "nipro_nc1",
 }
 
 PROFILE_CATEGORY = {
@@ -55,6 +57,7 @@ PROFILE_CATEGORY = {
     "thermometer": "ht",
     "nipro_cf": "gl",
     "mightysat": "spo2",
+    "nipro_nc1": "ecg",
 }
 
 
@@ -323,6 +326,13 @@ def infer_profile_from_name(adv_name: str) -> Optional[str]:
         return "nipro_nt100b"
     if n.startswith(PREFIX_CF) or PREFIX_CF in n:
         return "nipro_cf"
+    if (
+        n.startswith(PREFIX_NC1)
+        or PREFIX_NC1 in n
+        or "NC-1" in n
+        or "COCORON" in n.upper()
+    ):
+        return "nipro_nc1"
     if PREFIX_MIGHTY in n or n.startswith("Mighty"):
         return "mightysat"
     if n.startswith(PREFIX_NBCM) or PREFIX_NBCM in n:

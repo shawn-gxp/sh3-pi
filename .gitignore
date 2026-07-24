@@ -37,5 +37,9 @@ medical_ble_web/data/*.db-*
 medical_ble_web/data/*.db-wal
 medical_ble_web/data/*.db-shm
 medical_ble_web/data/*_state.json
+*.pem
+*.csv
+hub_config.json
 __pycache__/
 *.pyc
+

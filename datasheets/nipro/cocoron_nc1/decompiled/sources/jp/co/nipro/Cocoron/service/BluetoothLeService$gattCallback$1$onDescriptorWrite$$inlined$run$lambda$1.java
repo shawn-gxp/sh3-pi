@@ -1,0 +1,50 @@
+package jp.co.nipro.cocoron.service;
+
+import jp.co.nipro.cocoron.common.Config;
+import kotlin.Metadata;
+import kotlin.ResultKt;
+import kotlin.Unit;
+import kotlin.coroutines.Continuation;
+import kotlin.coroutines.intrinsics.IntrinsicsKt;
+import kotlin.coroutines.jvm.internal.DebugMetadata;
+import kotlin.coroutines.jvm.internal.SuspendLambda;
+import kotlin.jvm.functions.Function2;
+import kotlin.jvm.internal.Intrinsics;
+import kotlinx.coroutines.CoroutineScope;
+
+/* compiled from: BluetoothLeService.kt */
+@Metadata(bv = {1, 0, 3}, d1 = {"\u0000\u000e\n\u0000\n\u0002\u0010\u0002\n\u0002\u0018\u0002\n\u0002\b\u0003\u0010\u0000\u001a\u00020\u0001*\u00020\u0002H\u008a@¢\u0006\u0004\b\u0003\u0010\u0004¨\u0006\u0005"}, d2 = {"<anonymous>", "", "Lkotlinx/coroutines/CoroutineScope;", "invoke", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", "jp/co/nipro/cocoron/service/BluetoothLeService$gattCallback$1$onDescriptorWrite$2$1"}, k = 3, mv = {1, 4, 2})
+@DebugMetadata(c = "jp.co.nipro.cocoron.service.BluetoothLeService$gattCallback$1$onDescriptorWrite$2$1", f = "BluetoothLeService.kt", i = {}, l = {}, m = "invokeSuspend", n = {}, s = {})
+/* loaded from: classes.dex */
+final class BluetoothLeService$gattCallback$1$onDescriptorWrite$$inlined$run$lambda$1 extends SuspendLambda implements Function2<CoroutineScope, Continuation<? super Unit>, Object> {
+    int label;
+    final /* synthetic */ BluetoothLeService$gattCallback$1 this$0;
+
+    /* JADX WARN: 'super' call moved to the top of the method (can break code semantics) */
+    BluetoothLeService$gattCallback$1$onDescriptorWrite$$inlined$run$lambda$1(Continuation continuation, BluetoothLeService$gattCallback$1 bluetoothLeService$gattCallback$1) {
+        super(2, continuation);
+        this.this$0 = bluetoothLeService$gattCallback$1;
+    }
+
+    @Override // kotlin.coroutines.jvm.internal.BaseContinuationImpl
+    public final Continuation<Unit> create(Object obj, Continuation<?> completion) {
+        Intrinsics.checkNotNullParameter(completion, "completion");
+        return new BluetoothLeService$gattCallback$1$onDescriptorWrite$$inlined$run$lambda$1(completion, this.this$0);
+    }
+
+    @Override // kotlin.jvm.functions.Function2
+    public final Object invoke(CoroutineScope coroutineScope, Continuation<? super Unit> continuation) {
+        return ((BluetoothLeService$gattCallback$1$onDescriptorWrite$$inlined$run$lambda$1) create(coroutineScope, continuation)).invokeSuspend(Unit.INSTANCE);
+    }
+
+    @Override // kotlin.coroutines.jvm.internal.BaseContinuationImpl
+    public final Object invokeSuspend(Object obj) {
+        IntrinsicsKt.getCOROUTINE_SUSPENDED();
+        if (this.label != 0) {
+            throw new IllegalStateException("call to 'resume' before 'invoke' with coroutine");
+        }
+        ResultKt.throwOnFailure(obj);
+        this.this$0.this$0.setConfig((Config.INSTANCE.getSEND_INTERVAL_VALUE().length - Config.INSTANCE.getSendInterval()) - 1, Config.INSTANCE.getEcgMode());
+        return Unit.INSTANCE;
+    }
+}

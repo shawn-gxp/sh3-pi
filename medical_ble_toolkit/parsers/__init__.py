@@ -20,6 +20,7 @@ from .and_ua651 import (
 )
 from .htp import HtpTemperatureParser, parse_temperature_measurement
 from .nipro_cf import NiproCfParser, parse_cf_measurement
+from .nipro_nc1 import NiproNc1Parser
 from .nipro_common import encode_date_time_2a08 as nipro_encode_date_time_2a08
 from .nipro_nt100b import Nt100bCompanionParser, parse_htp_companion_style
 
@@ -39,6 +40,7 @@ __all__ = [
     "parse_temperature_measurement",
     "NiproCfParser",
     "parse_cf_measurement",
+    "NiproNc1Parser",
     "nipro_encode_date_time_2a08",
     "Nt100bCompanionParser",
     "parse_htp_companion_style",

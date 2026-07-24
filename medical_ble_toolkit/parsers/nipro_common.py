@@ -40,6 +40,7 @@ PREFIX_NT100B = "NT-100B"
 PREFIX_CF = "NIPRO CF"
 PREFIX_NBCM = "NBCM"
 PREFIX_MIGHTY = "MightySat"
+PREFIX_NC1 = "NC-1BLE"
 
 
 def encode_date_time_2a08(when: Optional[datetime] = None) -> bytes:

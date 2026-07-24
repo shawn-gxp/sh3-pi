@@ -271,10 +271,12 @@ Evidence: decompiled BLELib + NHL. Profiles in `profiles.py`.
 | **nipro_nsm1** | `NSM-1BLE*` | **B** | 1s → HTS `0x2A08` → HTP `0x2A1C` |
 | **nipro_nt100b** | `NT-100B*` | **B** | HTP `0x2A1C` only; TICD power-off on disconnect |
 | **nipro_cf** | `NIPRO CF*` | **B** | Proprietary CF UUIDs + RACP All; Diff/seq later |
+| **nipro_nc1** | `NC-1BLE*` / Cocoron ECG | **B** (bring-up) | Stream: CONFIG+DateTime; Huffman ECG + RRI; use `nc1_session` first |
 | **thermometer** | (lab) | **C** | TICD full history poll (not default companion) |
 | **mightysat** | `MightySat*` | **B** | GetInfo → SetClock(ticks) → EnableStream(from info) |
 
-CLI aliases: `nt100b`, `nbp`, `nmbp`, `nsm1`, `cocoron`.
+CLI aliases: `nt100b`, `nbp`, `nmbp`, `nsm1`, `nc1` / `nipro_nc1`.  
+**Note:** `cocoron` was an old alias for glucose CF — use `nipro_nc1` for the ECG transmitter.
 
 **Pair registry + hands-free** (local `nipro_paired_devices.json`):
 

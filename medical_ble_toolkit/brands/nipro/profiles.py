@@ -69,7 +69,7 @@ NIPRO_PROFILES: dict[str, DeviceProfile] = {
     brand="nipro",
     model="NIPRO CF",
     parser_key="nipro_cf",
-    name_hints=("NIPRO CF", "NIPROCF", "Cocoron"),
+    name_hints=("NIPRO CF", "NIPROCF"),
     service_uuid="5d87a4a0-e42d-11e5-beef-0002a5d5c51b",
     notify_uuids=(
         "5d87a4a1-e42d-11e5-beef-0002a5d5c51b",
@@ -78,8 +78,28 @@ NIPRO_PROFILES: dict[str, DeviceProfile] = {
     ),
     write_uuid="5d87a4a3-e42d-11e5-beef-0002a5d5c51b",
     notes=(
-        "Companion BLEDeviceCFL (Cocoron): proprietary glucose UUIDs, clock on "
-        "87F60002, RACP 04 01 / 01 01 (All) or Diff by last seq."
+        "Companion BLEDeviceCFL (glucose): proprietary UUIDs, clock on "
+        "87F60002, RACP 04 01 / 01 01 (All) or Diff by last seq. "
+        "NOT the Cocoron NC-1BLE ECG (use nipro_nc1)."
+    ),
+),
+"nipro_nc1": DeviceProfile(
+    id="nipro_nc1",
+    brand="nipro",
+    model="NC-1BLE",
+    parser_key="nipro_nc1",
+    name_hints=("NC-1BLE", "NC-1", "Cocoron", "COCORON"),
+    service_uuid="c74d1000-457d-4194-8b37-e7188723aea9",
+    notify_uuids=(
+        "c74d2002-457d-4194-8b37-e7188723aea9",  # RRT first (companion order)
+        "c74d2000-457d-4194-8b37-e7188723aea9",  # ECG
+        "00002a19-0000-1000-8000-00805f9b34fb",  # Battery
+    ),
+    write_uuid="c74d2001-457d-4194-8b37-e7188723aea9",  # CONFIG
+    notes=(
+        "Cocoron NC-1BLE ECG: long-lived stream. Post-connect CONFIG then "
+        "DateTime 0x2A08. Huffman ECG + RRI. Prefer standalone "
+        "python -m medical_ble_toolkit.brands.nipro.nc1_session for bring-up."
     ),
 ),
 }

@@ -38,6 +38,7 @@ from .parsers.beurer_tracker import BeurerTrackerParser
 from .parsers.beurer_ecg import BeurerEcgParser
 from .parsers.htp import HtpTemperatureParser
 from .parsers.nipro_cf import NiproCfParser
+from .parsers.nipro_nc1 import NiproNc1Parser
 from .parsers.nipro_nt100b import Nt100bCompanionParser
 from .parsers.base import parse_dispatch
 
@@ -95,6 +96,11 @@ _PROFILE_PARSERS: Dict[str, Callable[[], Any]] = {
     "nipront100b": _nipro_nt100b_parser,
     "nipro_cf": lambda: NiproCfParser(),
     "niprocf": lambda: NiproCfParser(),
+    "nipro_nc1": lambda: NiproNc1Parser(),
+    "nipronc1": lambda: NiproNc1Parser(),
+    "nc1": lambda: NiproNc1Parser(),
+    "nc1ble": lambda: NiproNc1Parser(),
+    "cocoron_nc1": lambda: NiproNc1Parser(),
     "mightysat": lambda: MightySatParser(),
     "masimo": lambda: MightySatParser(),
     "thermometer": lambda: ThermometerParser(),

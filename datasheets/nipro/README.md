@@ -6,11 +6,12 @@ from the repo after protocols were captured in the docs below.
 
 | File | Content |
 |------|---------|
-| `EXACT_PROTOCOL.md` / `.json` | Companion BLELib command frames & device paths |
+| `EXACT_PROTOCOL.md` / `.json` | げんきノート BLELib command frames & device paths |
 | `EXACT_HW_SEQUENCES.md` | Connect / measure / transfer sequences |
 | `NIPRO_BLE_DEVICE_MAP.md` | Device ↔ profile map |
 | `PARSER_VS_COMPANION_DIFF.md` | Toolkit vs companion differences |
 | `FIRST_PARTY_HW_SUPPORT.md` | Hardware support notes |
+| **`cocoron_nc1/`** | **Cocoron NC-1BLE ECG** — APK RE (`NC1BLE_FIRST_PARTY_PROTOCOL.md`) |
 | `tools_*.py` | Offline extract helpers (need local decompile tree if re-run) |
 | `*.pdf` | Vendor protocol / brochure PDFs |
 

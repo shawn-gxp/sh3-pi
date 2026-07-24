@@ -68,6 +68,7 @@ from .parsers import thermometer as thermo_mod
 from .parsers import and_ua651 as and_mod
 from .parsers import nipro_common as nipro_mod
 from .parsers import nipro_cf as nipro_cf_mod
+from .parsers import nipro_nc1 as nipro_nc1_mod
 
 log = logging.getLogger("medical_ble")
 
@@ -1498,6 +1499,49 @@ class MedicalBleClient:
                 _log_winrt(exc, operation="nipro_cf_racp")
             return
 
+        # --- Nipro NC-1BLE / Cocoron ECG (stream) ------------------------------
+        if pid == "nipro_nc1":
+            # Companion: CCCDs already on via start_notify → CONFIG → DATETIME
+            free_run = bool(getattr(self, "_nc1_free_run", False))
+            interval_s = int(getattr(self, "_nc1_interval_s", 60) or 60)
+            host_id = getattr(self, "_nc1_host_id", None) or nipro_nc1_mod.make_host_id()
+            prefs = nipro_nc1_mod.seconds_to_prefs_index(interval_s)
+            cfg = nipro_nc1_mod.encode_config(
+                free_run=free_run,
+                interval_prefs=prefs,
+                host_id=host_id,
+                use_companion_interval_map=True,
+            )
+            clock = nipro_nc1_mod.encode_datetime()
+            log.info(
+                "Nipro NC-1BLE: CONFIG free_run=%s interval=%ss host=%s then DateTime",
+                free_run,
+                interval_s,
+                host_id,
+            )
+            try:
+                await self._write_bytes(
+                    nipro_nc1_mod.CHAR_CONFIG,
+                    cfg,
+                    response=True,
+                    label="nipro_nc1_config",
+                )
+            except BleakError as exc:
+                log.error("Nipro NC-1 CONFIG write failed: %s", exc)
+                _log_winrt(exc, operation="nipro_nc1_config")
+            await asyncio.sleep(0.1)
+            try:
+                await self._write_bytes(
+                    nipro_nc1_mod.CHAR_DATETIME,
+                    clock,
+                    response=True,
+                    label="nipro_nc1_datetime",
+                )
+            except BleakError as exc:
+                log.warning("Nipro NC-1 DateTime write failed (continuing): %s", exc)
+                _log_winrt(exc, operation="nipro_nc1_datetime")
+            return
+
         if pid == "mightysat" and self.profile.write_uuid:
             # Companion: notify already on → GetInfo → (on rsp) SetClock ticks →
             # (on ACK) EnableStream from device-info[3:6]
@@ -2092,7 +2136,7 @@ class MedicalBleClient:
         """
         self._listen_end_reason = ""  # type: ignore[attr-defined]
         # Streaming profiles must not inherit BP quiet-end from a prior default
-        if quiet_timeout is None and self.profile.id in ("mightysat",):
+        if quiet_timeout is None and self.profile.id in ("mightysat", "nipro_nc1"):
             quiet_timeout = 0.0  # sentinel: listen() treats 0 as "off"
         # Post-measure defaults (Omron-like windows for Nipro)
         try:
@@ -2427,7 +2471,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
             default=None,
             help=(
                 "beurer_bm54 | and_ua651 | nipro_nbp | nipro_nmbp | nipro_nsm1 | "
-                "nipro_nt100b | nipro_cf | mightysat | thermometer | fora6 | omron"
+                "nipro_nt100b | nipro_cf | nipro_nc1 | mightysat | thermometer | "
+                "fora6 | omron"
             ),
         )
         sp.add_argument("--address", "-a", default=None, help="BLE MAC / address")
@@ -2508,7 +2553,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "-p",
         "--profile",
         default=None,
-        help="nipro_nbp | nipro_nmbp | nipro_nsm1 | nipro_nt100b | nipro_cf | mightysat",
+        help="nipro_nbp | nipro_nmbp | nipro_nsm1 | nipro_nt100b | nipro_cf | nipro_nc1 | mightysat",
     )
     n_pair.add_argument("-a", "--address", default=None, help="BLE MAC / address")
     n_pair.add_argument("--name", default=None, help="Exact advertised name (required if offline)")

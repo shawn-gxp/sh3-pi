@@ -1,0 +1,97 @@
+{
+  "product": "Nipro Cocoron NC-1BLE",
+  "app": {
+    "package": "jp.co.nipro.Cocoron",
+    "version_name": "1.0.0",
+    "version_code": 3,
+    "apk": "Cocoron_1.0.0_APKPure.apk"
+  },
+  "discovery": {
+    "scan_service_uuid": "C74D1000-457D-4194-8B37-E7188723AEA9",
+    "scan_mode": "BALANCED",
+    "scan_timeout_ms": 30000,
+    "name_hardcoded": false,
+    "name_hints_product": ["NC-1BLE", "Cocoron", "NC-1"]
+  },
+  "connect": {
+    "auto_connect": true,
+    "transport_le": 2,
+    "auto_reconnect": true,
+    "reconnect_delay_s": 1.0
+  },
+  "uuids": {
+    "service": "C74D1000-457D-4194-8B37-E7188723AEA9",
+    "ecg": "C74D2000-457D-4194-8B37-E7188723AEA9",
+    "config": "C74D2001-457D-4194-8B37-E7188723AEA9",
+    "rrt": "C74D2002-457D-4194-8B37-E7188723AEA9",
+    "datetime": "00002A08-0000-1000-8000-00805F9B34FB",
+    "battery": "00002A19-0000-1000-8000-00805F9B34FB",
+    "cccd": "00002902-0000-1000-8000-00805F9B34FB"
+  },
+  "notify_chars": ["ecg", "rrt", "battery"],
+  "write_chars": ["config", "datetime"],
+  "sequence": [
+    "scan_filter_service",
+    "connect_gatt_le",
+    "discover_services",
+    "enable_notify_ecg_rrt_battery",
+    "write_cccd_prefer_rrt_first_then_chain",
+    "write_config",
+    "write_datetime_after_config_ok",
+    "stream_until_disconnect"
+  ],
+  "config_write": {
+    "layout": "mode_u8 | interval_u8 | host_id_ascii8",
+    "mode": {
+      "normal": 0,
+      "free_run": 2,
+      "ui_mode_1_maps_to": 2
+    },
+    "interval_ui_labels": ["60s", "30s", "10s", "5s"],
+    "post_cccd_wire_interval": "wire = (4 - prefs_index) - 1",
+    "wire_interval_by_prefs": {
+      "0_60s": 3,
+      "1_30s": 2,
+      "2_10s": 1,
+      "3_5s": 0
+    },
+    "host_id": "8-char lowercase uuid fragment stored in app prefs"
+  },
+  "datetime_write": {
+    "uuid": "00002A08-0000-1000-8000-00805F9B34FB",
+    "layout": "year_u16_le | mon | day | hour | min | sec",
+    "year_full": true
+  },
+  "rrt_notify": {
+    "flags": {
+      "datetime": 16,
+      "leads_off": 32,
+      "ecg_free_run": 2,
+      "illegal_iphone": 64
+    },
+    "rr_time": "uint16_le_ms",
+    "interval_echo": "u8_after_rr"
+  },
+  "ecg_notify": {
+    "header": {
+      "datetime_flag": 64,
+      "data_size_mask": 63,
+      "packet_counter": "uint16_le_at_1"
+    },
+    "sample_rate_hz_design": 125,
+    "scale_mV": "(raw - 512) * 0.01",
+    "codec": "huffman_delta",
+    "huffman_table_file": "huffman_node_index.json",
+    "huffman_table_len": 4096,
+    "optional_filter": "libntf-lib.so Ntf.apply"
+  },
+  "battery_notify": {
+    "layout": "level_u16_le | major | minor | bugfix",
+    "warning_level": 2300
+  },
+  "sources": [
+    "service/BluetoothLeService.java",
+    "data/value/*.java",
+    "common/Config.java"
+  ]
+}
