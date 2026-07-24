@@ -1,4 +1,0 @@
-# Large MediaPipe .task models — downloaded on first pose run
-*.task
-*.partial
-!*.md
